@@ -20,14 +20,12 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .agent.input_router import InputRouter
-from .agent.react_agent import ReActDiagnosticAgent
+from .agent.langchain_agent import LangChainDiagnosticAgent
 from .config import Settings, get_settings, reset_settings
 from .models.input import InputIntent, InputType
 from .parsers.unified import parse_input
 from .reporting.entries import generate_both as generate_db_entries
 from .reporting.markdown import generate_markdown_report
-from .retrieval.hybrid import HybridRetriever
-from .storage.chroma_store import ChromaVectorStore
 
 SUPPORTED_EXTENSIONS = {".xlsx", ".csv"}
 PROCESSED_DIR_NAME = "processed"
@@ -129,7 +127,7 @@ def _print_model_status(settings: Settings) -> None:
 
 
 def _build_components(settings: Settings):
-    """构建存储 + 检索器"""
+    """构建存储"""
     store = ChromaVectorStore(
         persist_dir=settings.vector_store.persist_dir,
         collection_name=settings.vector_store.collection_name,
@@ -137,17 +135,7 @@ def _build_components(settings: Settings):
         api_key=settings.embedding.api_key or None,
         api_base=settings.embedding.api_base or None,
     )
-    retriever = HybridRetriever(
-        store,
-        semantic_top_k=settings.retrieval.semantic.top_k,
-        filter_top_k=settings.retrieval.filter.default_top_k,
-        semantic_weight=settings.retrieval.hybrid.semantic_weight,
-        filter_weight=settings.retrieval.hybrid.filter_weight,
-        score_threshold=settings.retrieval.semantic.score_threshold,
-        filter_expansion_ratio=settings.retrieval.hybrid.filter_expansion_ratio,
-        filter_fields=settings.retrieval.filter.filter_fields,
-    )
-    return store, retriever, settings
+    return store, settings
 
 
 @app.command()
@@ -226,14 +214,9 @@ def diagnose(
         console.print(f"  检索 query: {parsed.search_query[:80]}...")
     console.print()
 
-    # 构建组件
-    store, retriever, _ = _build_components(settings)
-    console.print(f"  向量库记录数: {store.count()}")
-    console.print()
-
-    # 执行诊断
+    # 执行诊断（使用新的 LangChainDiagnosticAgent）
     try:
-        agent = ReActDiagnosticAgent(settings=settings, retriever=retriever)
+        agent = LangChainDiagnosticAgent(settings=settings)
         output = agent.diagnose(parsed)
     except Exception as e:
         console.print(f"[red]诊断失败: {e}[/red]")
@@ -267,15 +250,17 @@ def search(
     reset_settings()
     settings = get_settings()
 
-    store, retriever, _ = _build_components(settings)
+    from .retrieval.langchain_retrievers import create_chroma_retriever
 
-    results = retriever.retrieve(
+    retriever = create_chroma_retriever()
+
+    docs = retriever.search_with_filters(
         query=query,
         vehicle_type=vehicle_type,
         top_k=top_k,
     )
 
-    console.print(Panel.fit(f"🔍 检索结果 ({len(results)} 条)", style="bold blue"))
+    console.print(Panel.fit(f"🔍 检索结果 ({len(docs)} 条)", style="bold blue"))
 
     table = Table(show_header=True, header_style="bold magenta")
     table.add_column("ID", style="dim", width=20)
@@ -284,13 +269,13 @@ def search(
     table.add_column("车型", width=15)
     table.add_column("相似度", justify="right", width=10)
 
-    for r in results:
+    for doc in docs:
         table.add_row(
-            r.id[:20],
-            r.metadata.get("problem_description", "")[:40],
-            r.metadata.get("root_cause", "")[:30],
-            r.metadata.get("vehicle_type", "")[:15],
-            f"{r.score:.2f}",
+            doc.metadata.get("id", "")[:20],
+            doc.metadata.get("problem_description", "")[:40],
+            doc.metadata.get("root_cause", "")[:30],
+            doc.metadata.get("vehicle_type", "")[:15],
+            f"{doc.metadata.get('score', 0.0):.2f}",
         )
 
     console.print(table)
@@ -368,7 +353,7 @@ def load_data(
     console.print()
 
     # 构建组件（只构建一次）
-    store, _, _ = _build_components(settings)
+    store, _ = _build_components(settings)
     from .models.incident import IncidentRecord
 
     # 逐个处理文件
@@ -444,7 +429,7 @@ def stats():
     console.print(Panel.fit("📊 向量库统计", style="bold blue"))
     _print_model_status(settings)
 
-    store, _, _ = _build_components(settings)
+    store, _ = _build_components(settings)
     console.print(f"  总记录数: {store.count()}")
     console.print(f"  存储路径: {store.persist_dir}")
     console.print(f"  集合名称: {store.collection_name}")
@@ -463,7 +448,7 @@ def clear(
     reset_settings()
     settings = get_settings()
 
-    store, _, _ = _build_components(settings)
+    store, _ = _build_components(settings)
     store.clear()
     console.print("[green]✅ 向量库已清空[/green]")
 

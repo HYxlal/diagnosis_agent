@@ -1,6 +1,9 @@
-"""精确过滤检索工具
+"""[DEPRECATED] 精确过滤检索工具
 
-使用 VectorStoreAdapter.filter() 做纯 metadata 精确过滤，
+已废弃：请使用 langchain_retrievers.py 中的 ChromaVectorRetriever.search_with_filters()
+保留此文件仅用于兼容旧版本代码（hybrid.py → react_agent.py）。
+
+原说明：使用 VectorStoreAdapter.filter() 做纯 metadata 精确过滤，
 不走 embedding 路径，彻底消除 query 占位符问题。
 
 支持的可过滤字段由 config.yaml 中 retrieval.filter.filter_fields 配置，

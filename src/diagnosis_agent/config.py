@@ -104,6 +104,12 @@ class AppConfig(BaseModel):
     version: str = "0.1.0"
 
 
+class Neo4jConfig(BaseModel):
+    url: str = ""
+    user: str = ""
+    password: str = ""
+
+
 class Settings(BaseModel):
     """全局配置根模型"""
 
@@ -117,6 +123,7 @@ class Settings(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    neo4j: Neo4jConfig = Field(default_factory=Neo4jConfig)
 
 
 # ---------------------------------------------------------------------------

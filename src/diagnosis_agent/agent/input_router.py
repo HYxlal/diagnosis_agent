@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from ..config import Settings
 from ..models.input import InputIntent, InputType, ParsedInput
+from ..parsers.field_extractor import FieldExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,11 @@ INTENT_CLASSIFICATION_PROMPT = """你是一个输入意图分类器。请判断�
 4. **working_condition_file**：工况文件。用户上传的是工况数据文件（非标准 xlsx/csv 工单），需要先转换。
    示例：文件扩展名是 .asc/.blf/.mdf 等非标准格式，或文件内容是时间序列工况数据
 
-请根据输入内容进行分类，并提取检索关键词。"""
+任务要求：
+1. 根据输入内容进行分类
+2. 如果是 diagnostic_query，从用户输入中提取核心故障描述作为 search_query，不要使用示例中的内容
+3. 如果不是 diagnostic_query，search_query 保持为空字符串
+"""
 
 
 # 非 LLM 回退的关键词规则（LLM 不可用时的降级方案）
@@ -102,7 +107,8 @@ class InputRouter:
 
         try:
             from langchain_openai import ChatOpenAI
-            from langchain.chains import create_structured_output_chain
+            from langchain_core.output_parsers import JsonOutputParser
+            from langchain_core.prompts import ChatPromptTemplate
 
             llm = ChatOpenAI(
                 model=self.settings.input_router.model,
@@ -112,12 +118,18 @@ class InputRouter:
                 base_url=llm_config.api_base,
             )
 
-            chain = create_structured_output_chain(
-                IntentClassificationResult,
-                llm,
-                INTENT_CLASSIFICATION_PROMPT,
-                verbose=False,
-            )
+            parser = JsonOutputParser(pydantic_object=IntentClassificationResult)
+
+            format_instructions = parser.get_format_instructions()
+
+            system_message = INTENT_CLASSIFICATION_PROMPT + "\n\n" + format_instructions
+
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", system_message),
+                ("human", "{{input}}"),
+            ], template_format="jinja2")
+
+            chain = prompt | llm | parser
             return chain
 
         except Exception as e:
@@ -191,6 +203,14 @@ class InputRouter:
                 f"InputRouter (LLM): intent={parsed_input.intent.value}, "
                 f"search_query={parsed_input.search_query[:50] if parsed_input.search_query else 'None'}"
             )
+
+            # 如果是诊断查询，进行字段提取
+            if parsed_input.intent == InputIntent.DIAGNOSTIC_QUERY:
+                try:
+                    extractor = FieldExtractor()
+                    parsed_input.field_extraction = extractor.extract(text)
+                except Exception as e:
+                    logger.warning(f"字段提取失败: {e}")
 
         except Exception as e:
             logger.warning(f"InputRouter LLM 调用失败，使用规则回退: {e}")

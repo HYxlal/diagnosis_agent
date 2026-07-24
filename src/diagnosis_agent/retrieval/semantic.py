@@ -1,4 +1,10 @@
-"""语义检索工具"""
+"""[DEPRECATED] 语义检索工具
+
+已废弃：请使用 langchain_retrievers.py 中的 ChromaVectorRetriever
+保留此文件仅用于兼容旧版本代码（hybrid.py → react_agent.py）。
+
+原说明：基于向量相似度检索相似工况。
+"""
 
 from __future__ import annotations
 

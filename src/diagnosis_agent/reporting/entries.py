@@ -38,6 +38,7 @@ def generate_database_entry_csv(
 
     entry = output.database_entry
     entry_dict = entry.to_dict()
+    entry_dict.pop('similar_record_ids', None)
 
     with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(entry_dict.keys()))
@@ -72,6 +73,7 @@ def generate_database_entry_json(
 
     entry = output.database_entry
     entry_dict = entry.to_dict()
+    entry_dict.pop('similar_record_ids', None)
 
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(entry_dict, f, ensure_ascii=False, indent=2)

@@ -18,7 +18,8 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from ..config import Settings
-from ..retrieval.hybrid import HybridRetriever
+from ..models.incident import IncidentRecord
+from ..retrieval.langchain_retrievers import ChromaVectorRetriever, document_to_record
 from ..storage.vector_store import SearchResult
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ class DiagnosticTools:
 
     def __init__(
         self,
-        retriever: HybridRetriever,
+        retriever,
         settings: Optional[Settings] = None,
     ):
         self.retriever = retriever
@@ -96,20 +97,45 @@ class DiagnosticTools:
     ) -> list[dict]:
         """检索相似工单实现"""
         k = top_k or self._default_search_top_k
-        results = self.retriever.retrieve(query=query, vehicle_type=vehicle_type, top_k=k)
-        return [self._to_dict(r) for r in results]
+
+        if hasattr(self.retriever, 'search_with_filters'):
+            docs = self.retriever.search_with_filters(
+                query=query,
+                vehicle_type=vehicle_type,
+                top_k=k,
+            )
+        else:
+            docs = self.retriever.invoke(query)[:k]
+
+        return [self._doc_to_dict(doc) for doc in docs]
 
     def _filter_by_vehicle_type_impl(self, vehicle_type: str, top_k: Optional[int] = None) -> list[dict]:
         """按车型过滤实现"""
         k = top_k or self._default_filter_top_k
-        results = self.retriever.filter_retriever.filter_by(vehicle_type=vehicle_type, top_k=k)
-        return [self._to_dict(r) for r in results]
+
+        if hasattr(self.retriever, 'search_with_filters'):
+            docs = self.retriever.search_with_filters(
+                query="",
+                vehicle_type=vehicle_type,
+                top_k=k,
+            )
+        else:
+            docs = []
+
+        return [self._doc_to_dict(doc) for doc in docs]
 
     def _get_incident_detail_impl(self, record_id: str) -> Optional[dict]:
         """获取工单详情实现"""
-        record = self.retriever.store.get_by_id(record_id)
-        if record:
-            return record.to_dict()
+        try:
+            if hasattr(self.retriever, 'vectorstore'):
+                vectorstore = self.retriever.vectorstore
+                if hasattr(vectorstore, '_collection'):
+                    result = vectorstore._collection.get(ids=[record_id])
+                    if result["ids"] and result["metadatas"]:
+                        record = IncidentRecord.from_dict(result["metadatas"][0])
+                        return record.to_dict()
+        except Exception as e:
+            logger.error(f"获取工单详情失败: {e}")
         return None
 
     def _convert_working_condition_file_impl(self, file_path: str) -> dict:
@@ -130,15 +156,12 @@ class DiagnosticTools:
             return {"error": str(e), "description": ""}
 
     @staticmethod
-    def _to_dict(result: SearchResult) -> dict:
-        """将 SearchResult 转为字典"""
-        record = result.record
-        if record:
-            d = record.to_dict()
-        else:
-            d = result.metadata.copy()
-        d["record_id"] = result.id
-        d["similarity"] = round(result.score, 4)
+    def _doc_to_dict(doc) -> dict:
+        """将 Document 转为字典"""
+        record = document_to_record(doc)
+        d = record.to_dict()
+        d["record_id"] = doc.metadata.get("id", "")
+        d["similarity"] = round(doc.metadata.get("score", 0.0), 4)
         return d
 
     # ------------------------------------------------------------------

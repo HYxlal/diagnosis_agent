@@ -1,10 +1,6 @@
-"""[DEPRECATED] ReAct 推理 Agent
+"""LangChain Agent 实现
 
-已废弃：请使用 langchain_agent.py 中的 LangChainDiagnosticAgent
-保留此文件仅用于兼容旧版本代码。
-
-原说明：使用 LangChain + LangGraph 进行故障诊断推理。
-使用 create_react_agent 构建 ReAct 循环，支持结构化工具调用和输出。
+基于 LangChain 最新架构的诊断 Agent，使用多源检索。
 """
 
 from __future__ import annotations
@@ -13,11 +9,11 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage
+from langchain_core.retrievers import BaseRetriever
 
 from ..config import Settings
 from ..models.diagnostic_output import DiagnosticResult
@@ -28,9 +24,16 @@ from ..models.diagnosis import (
     DiagnosticReport,
     SimilarCase,
     ToolCallRecord,
+    ReActStep,
 )
 from ..models.input import InputIntent, ParsedInput
-from ..retrieval.hybrid import HybridRetriever
+from ..models.incident import IncidentRecord
+from ..retrieval.langchain_retrievers import (
+    ChromaVectorRetriever,
+    document_to_record,
+    create_chroma_retriever,
+)
+from ..utils.llm_factory import create_llm
 from .prompts import (
     build_similar_case_prompt,
     build_no_similar_case_prompt,
@@ -41,73 +44,40 @@ from .tools import DiagnosticTools
 logger = logging.getLogger(__name__)
 
 
-class ReActDiagnosticAgent:
-    """ReAct 诊断 Agent
+class LangChainDiagnosticAgent:
+    """基于 LangChain 最新架构的诊断 Agent
 
-    使用 LangGraph create_react_agent 构建，支持结构化工具调用。
+    使用多源检索：
+    - ChromaVectorRetriever: 向量语义检索
+    - BM25KeywordRetriever: 关键词检索（可选）
+    - Neo4jGraphRetriever: 知识图谱检索（可选）
 
-    流程：
-    1. 接收 ParsedInput
-    2. 预检索相似工况（在 Agent 循环之前）
-    3. 构建系统 prompt，注入相似工况信息
-    4. 调用 create_react_agent 执行 ReAct 循环
-    5. 解析结构化输出（Pydantic 模型验证）
-    6. 构建双层诊断输出（报告 + 数据库条目）
+    使用 langchain.agents.create_agent 构建 Agent。
     """
 
-    def __init__(
-        self,
-        settings: Settings,
-        retriever: HybridRetriever,
-    ):
+    def __init__(self, settings: Settings):
         self.settings = settings
-        self.retriever = retriever
-        self.tools = DiagnosticTools(retriever, settings=settings)
-
         self._llm = self._init_llm()
+        self._retriever = self._init_retriever()
+        self._tools = DiagnosticTools(
+            retriever=self._retriever,
+            settings=settings,
+        )
 
     def _init_llm(self):
-        """初始化 LLM — 必须可用，无 fallback"""
-        llm_config = self.settings.llm
+        """初始化 LLM"""
+        return create_llm()
 
-        if not llm_config.api_key:
-            raise RuntimeError(
-                "LLM API key 未配置。请设置 DASHSCOPE_API_KEY 环境变量。"
-            )
-
-        try:
-            return ChatOpenAI(
-                model=llm_config.model,
-                temperature=llm_config.temperature,
-                max_tokens=llm_config.max_tokens,
-                api_key=llm_config.api_key,
-                base_url=llm_config.api_base,
-            )
-        except Exception as e:
-            raise RuntimeError(f"LLM 初始化失败: {e}") from e
+    def _init_retriever(self) -> BaseRetriever:
+        """初始化检索器"""
+        return create_chroma_retriever()
 
     def register_working_condition_converter(self, converter) -> None:
         """注册工况文件转换工具"""
-        self.tools.register_working_condition_converter(converter)
-
-    # ------------------------------------------------------------------
-    # 主诊断入口
-    # ------------------------------------------------------------------
+        self._tools.register_working_condition_converter(converter)
 
     def diagnose(self, parsed_input: ParsedInput) -> DiagnosticOutput:
-        """执行完整诊断流程
-
-        根据 InputRouter 分类结果决定是否预检索：
-        - DIAGNOSTIC_QUERY: 正常预检索后进 ReAct
-        - INSTRUCTION / SUPPLEMENT: 跳过检索直接进 ReAct
-        - WORKING_CONDITION_FILE: 工况文件（转换已在 CLI 层处理）
-
-        Args:
-            parsed_input: 解析后的输入（已经过 InputRouter 分类）
-
-        Returns:
-            DiagnosticOutput 双层诊断结果
-        """
+        """执行完整诊断流程"""
         description = parsed_input.description or ""
 
         diagnosis_id = f"DIAG-{uuid.uuid4().hex[:8]}"
@@ -115,10 +85,9 @@ class ReActDiagnosticAgent:
 
         logger.info(f"开始诊断 [{diagnosis_id}]: intent={parsed_input.intent.value}, {description[:100]}...")
 
-        # Step 1: 工况文件处理
         if parsed_input.intent == InputIntent.WORKING_CONDITION_FILE:
             logger.info("检测到工况文件意图，先调用转换工具")
-            convert_result = self.tools.convert_working_condition_file(parsed_input.source_file or "")
+            convert_result = self._tools.convert_working_condition_file(parsed_input.source_file or "")
             if convert_result.get("description"):
                 description = convert_result["description"]
                 parsed_input.description = description
@@ -126,7 +95,6 @@ class ReActDiagnosticAgent:
                 parsed_input.bulk_records = convert_result["records"]
             parsed_input.intent = InputIntent.DIAGNOSTIC_QUERY
 
-        # Step 2: 预检索相似工况（保留现有逻辑）
         if parsed_input.intent == InputIntent.DIAGNOSTIC_QUERY:
             similar_cases = self._retrieve_similar_cases(parsed_input)
         else:
@@ -135,17 +103,14 @@ class ReActDiagnosticAgent:
         has_similar = len(similar_cases) > 0
         logger.info(f"初始检索到 {len(similar_cases)} 条相似工况")
 
-        # Step 3: 构建 Agent 并执行 ReAct 循环
-        reasoning_result, tool_calls, react_steps = self._run_react_agent(
+        reasoning_result, tool_calls, react_steps = self._run_agent(
             description=description,
             similar_cases=similar_cases,
             has_similar=has_similar,
         )
 
-        # Step 4: 构建诊断发现
         findings = self._build_findings(reasoning_result, similar_cases)
 
-        # Step 5: 构建相似工况模型
         similar_case_models = [
             SimilarCase(
                 record_id=c.get("record_id", ""),
@@ -162,7 +127,6 @@ class ReActDiagnosticAgent:
             for c in similar_cases
         ]
 
-        # Step 6: 构建报告
         tools_used = list(set(tc.tool_name for tc in tool_calls))
 
         report = DiagnosticReport(
@@ -180,19 +144,20 @@ class ReActDiagnosticAgent:
             tools_used=tools_used,
         )
 
-        # Step 7: 构建数据库条目
         confidence = reasoning_result.get("confidence", 0.3)
+
+        field_extraction = parsed_input.field_extraction
         database_entry = DatabaseEntry(
             diagnosis_id=diagnosis_id,
             diagnosis_time=diagnosis_time,
-            problem_description=description[:500],
+            problem_description=field_extraction.problem_description if field_extraction else description[:500],
             root_cause=reasoning_result.get("root_cause", ""),
             countermeasure=reasoning_result.get("countermeasure", ""),
-            drive_code=self._extract_from_records(parsed_input, "drive_code"),
-            vehicle_type=self._extract_from_records(parsed_input, "vehicle_type"),
-            dashboard_indicator=self._extract_from_records(parsed_input, "dashboard_indicator"),
-            dtc_code=self._extract_from_records(parsed_input, "dtc_code"),
-            fault_scenario=self._extract_from_records(parsed_input, "fault_scenario"),
+            drive_code=field_extraction.drive_code if field_extraction else self._extract_from_records(parsed_input, "drive_code"),
+            vehicle_type=field_extraction.vehicle_type if field_extraction else self._extract_from_records(parsed_input, "vehicle_type"),
+            dashboard_indicator=field_extraction.dashboard_indicator if field_extraction else self._extract_from_records(parsed_input, "dashboard_indicator"),
+            dtc_code=field_extraction.dtc_code if field_extraction else self._extract_from_records(parsed_input, "dtc_code"),
+            fault_scenario=field_extraction.fault_scenario if field_extraction else self._extract_from_records(parsed_input, "fault_scenario"),
             diagnostic_confidence=confidence,
             based_on_similar=has_similar,
             similar_record_ids=[c.get("record_id", "") for c in similar_cases],
@@ -200,72 +165,51 @@ class ReActDiagnosticAgent:
 
         return DiagnosticOutput(report=report, database_entry=database_entry)
 
-    # ------------------------------------------------------------------
-    # ReAct Agent 执行
-    # ------------------------------------------------------------------
-
-    def _run_react_agent(
+    def _run_agent(
         self,
         description: str,
         similar_cases: list[dict],
         has_similar: bool,
     ) -> tuple[dict, list[ToolCallRecord], list]:
-        """使用 create_react_agent 执行 ReAct 循环
-
-        保留预检索逻辑，将相似工况注入 prompt，使用结构化输出。
-
-        Returns:
-            (reasoning_result, tool_calls, react_steps)
-        """
-        # 构建 system prompt
+        """使用 langchain.agents.create_agent 执行 Agent 循环"""
         system_prompt = self._build_system_prompt()
 
-        # 构建 user prompt（包含预检索的相似工况）
         if has_similar:
             cases_text = format_similar_cases_for_prompt(similar_cases)
             user_prompt = build_similar_case_prompt(description=description, similar_cases_text=cases_text)
         else:
             user_prompt = build_no_similar_case_prompt(description=description)
 
-        # 获取工具列表
-        tools = self.tools.get_tool_list()
+        tools = self._tools.get_tool_list()
 
-        # 创建 ReAct Agent（使用 prompt 参数传入系统提示词）
-        agent = create_react_agent(
+        agent = create_agent(
             model=self._llm,
             tools=tools,
-            prompt=system_prompt,
+            system_prompt=system_prompt,
         )
 
-        # 执行 Agent
-        logger.info("开始 ReAct 循环")
+        logger.info("开始 Agent 循环")
         try:
             result = agent.invoke({
                 "messages": [
-                    HumanMessage(content=user_prompt)
+                    {"role": "user", "content": user_prompt}
                 ]
             })
         except Exception as e:
-            logger.error(f"ReAct Agent 执行失败: {e}")
+            logger.error(f"Agent 执行失败: {e}")
             return {}, [], []
 
-        # 解析结果
         messages = result.get("messages", [])
         last_message = messages[-1] if messages else None
 
-        # 提取工具调用记录
         tool_calls = self._extract_tool_calls(messages)
-
-        # 提取推理步骤
         react_steps = self._extract_react_steps(messages)
-
-        # 解析最终答案
         reasoning_result = self._parse_final_result(last_message)
 
         return reasoning_result, tool_calls, react_steps
 
     def _build_system_prompt(self) -> str:
-        """构建系统 prompt，包含结构化输出要求"""
+        """构建系统 prompt"""
         return f"""你是一个专业的车辆故障诊断专家 Agent。
 
 你的任务：分析故障描述，调用工具检索历史工单，输出诊断结论和推荐对策。
@@ -316,18 +260,16 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
                     tool_calls.append(tc_record)
         return tool_calls
 
-    def _extract_react_steps(self, messages) -> list:
+    def _extract_react_steps(self, messages) -> list[ReActStep]:
         """从消息列表中提取推理步骤"""
-        from ..models.diagnosis import ReActStep
-
         steps = []
         step_num = 1
         for msg in messages:
             content = getattr(msg, 'content', '')
-            if content and not isinstance(content, dict):
+            if content and not isinstance(content, dict) and content != 'null':
                 step = ReActStep(
                     step=step_num,
-                    thought=content[:500],
+                    thought=content,
                     action='',
                     action_input={},
                     observation='',
@@ -343,12 +285,10 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
 
         content = getattr(last_message, 'content', '')
 
-        # 尝试解析 JSON
         try:
             if isinstance(content, dict):
                 data = content
             else:
-                # 提取 JSON 部分
                 import re
                 json_match = re.search(r'\{[\s\S]*\}', str(content))
                 if json_match:
@@ -356,7 +296,6 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
                 else:
                     return self._get_default_result()
 
-            # 使用 Pydantic 验证
             result = DiagnosticResult(**data)
             return result.dict()
 
@@ -365,7 +304,7 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
             return self._get_default_result()
 
     def _get_default_result(self) -> dict:
-        """返回默认结果（解析失败时）"""
+        """返回默认结果"""
         return {
             "root_cause": "详见推理叙述",
             "countermeasure": "详见推理叙述",
@@ -374,26 +313,27 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
             "findings": [],
         }
 
-    # ------------------------------------------------------------------
-    # 辅助方法
-    # ------------------------------------------------------------------
-
     def _retrieve_similar_cases(self, parsed_input: ParsedInput) -> list[dict]:
-        """检索相似工况"""
+        """使用检索器检索相似工况"""
         try:
-            results = self.retriever.retrieve_from_parsed(parsed_input, top_k=5)
+            query = parsed_input.search_query or parsed_input.description or ""
+            if not query:
+                return []
+
+            docs = self._retriever.invoke(query)
+
+            cases: list[dict] = []
+            for doc in docs:
+                record = document_to_record(doc)
+                record_dict = record.to_dict()
+                record_dict["record_id"] = doc.metadata.get("id", "")
+                record_dict["similarity"] = doc.metadata.get("score", 0.0)
+                cases.append(record_dict)
+
+            return cases
         except Exception as e:
             logger.warning(f"检索失败: {e}")
             return []
-
-        cases: list[dict] = []
-        for r in results:
-            record_dict = r.record.to_dict() if r.record else r.metadata
-            record_dict["record_id"] = r.id
-            record_dict["similarity"] = r.score
-            cases.append(record_dict)
-
-        return cases
 
     def _build_findings(
         self,

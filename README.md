@@ -10,9 +10,10 @@ Diagnosis Agent 是一个车辆故障诊断系统，核心能力：
 
 1. **接收多格式输入**：用户可传入 Excel（xlsx）、CSV 文件，或直接用自然语言描述故障现象
 2. **LLM 表头容错**：输入文件表头与标准 8 列不完全匹配时，由 LLM 自动映射到标准列名
-3. **检索历史案例**：通过 ChromaDB 向量数据库语义检索相似故障工况
-4. **纯 LLM 推理诊断**：LangChain + ChatOpenAI 进行 ReAct 风格推理，无规则降级路径
-5. **双层输出**：同时生成人类可读的 Markdown 诊断报告和可直接录入数据库的 CSV/JSON 结构化条目
+3. **输入意图路由**：通过 InputRouter 判断输入意图（诊断、批量导入、检索），自动选择处理路径
+4. **检索历史案例**：通过 ChromaDB 向量数据库语义检索相似故障工况
+5. **纯 LLM 推理诊断**：LangChain + ChatOpenAI 进行 ReAct 风格推理，无规则降级路径
+6. **双层输出**：同时生成人类可读的 Markdown 诊断报告和可直接录入数据库的 CSV/JSON 结构化条目
 
 ### 标准 8 列表头
 
@@ -91,6 +92,26 @@ paths:
 
 report:
   output_dir: "output"
+
+retrieval:
+  semantic:
+    top_k: 10
+    score_threshold: 0.6
+  filter:
+    default_top_k: 5
+    filter_fields: ["vehicle_type", "dtc_code", "drive_code"]
+  hybrid:
+    semantic_weight: 0.7
+    filter_weight: 0.3
+    filter_expansion_ratio: 2.0
+
+tools:
+  search_top_k: 5
+  filter_top_k: 3
+
+input_router:
+  enabled: true
+  model: gpt-4o-mini
 ```
 
 配置加载逻辑见 `src/diagnosis_agent/config.py`，由 `Settings` Pydantic 模型统一管理，`get_settings()` 返回全局单例。
@@ -112,6 +133,7 @@ python -m diagnosis_agent.cli <command> [options]
 | `search` | 仅检索相似案例 | `--query`，`--vehicle-type`，`--top-k` |
 | `stats` | 查看向量库统计 | — |
 | `clear` | 清空向量库 | `--confirm` |
+| `config` | 查看当前模型配置状态 | — |
 
 ### 命令示例
 
@@ -130,6 +152,9 @@ python -m diagnosis_agent.cli search --query "DTC P0107 进气压力传感器" -
 
 # 查看向量库统计
 python -m diagnosis_agent.cli stats
+
+# 查看当前配置
+python -m diagnosis_agent.cli config
 ```
 
 ### 输入数据格式
@@ -144,49 +169,217 @@ problem_description,root_cause,countermeasure,drive_code,vehicle_type,dashboard_
 
 ---
 
-## 项目架构
+## 重构后项目架构
+
+### 整体架构图
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    用户输入                           │
-│           (xlsx / csv / 自然语言)                     │
-└────────────────────────┬────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────────────┐
-│              输入解析器 (parsers/)                    │
-│  csv/xlsx → 表头映射(精确+LLM) → ParsedInput         │
-│  自然语言 → ParsedInput (纯文本透传，由 LLM 推理)     │
-└────────────────────────┬────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────────────┐
-│            向量检索 (storage/ + retrieval/)          │
-│  ChromaVectorStore (ChromaDB, 必需)                  │
-│  HybridRetriever: 语义检索 ⊕ 精确过滤               │
-└────────────────────────┬────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────────────┐
-│            推理 Agent (agent/react_agent.py)         │
-│  纯 LLM ReAct 推理（无规则降级）                      │
-│  Thought → Action → Observation → Final Answer      │
-└────────────────────────┬────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────────────┐
-│               双层输出 (reporting/)                   │
-│  Markdown 报告 (人读) + CSV/JSON 条目 (机读)         │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                      用户输入层                                   │
+│          (xlsx / csv / 自然语言 / 目录批量)                        │
+└─────────────────────────────┬────────────────────────────────────┘
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                    CLI 入口 (cli.py)                              │
+│  命令分发 → 参数校验 → 配置加载 → 模型状态展示                      │
+└─────────────────────────────┬────────────────────────────────────┘
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                   输入解析层 (parsers/)                           │
+│  csv/xlsx → 表头映射(精确+LLM) → ParsedInput                      │
+│  自然语言 → ParsedInput (纯文本透传，由 LLM 推理)                  │
+└─────────────────────────────┬────────────────────────────────────┘
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                意图路由层 (agent/input_router.py)                  │
+│  判断输入意图: DIAGNOSE / BATCH_IMPORT / SEARCH / UNKNOWN         │
+│  根据意图选择处理路径                                             │
+└─────────────────────────────┬────────────────────────────────────┘
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                   向量检索层 (storage/ + retrieval/)               │
+│  ChromaVectorStore (ChromaDB, 必需)                              │
+│  HybridRetriever: 语义检索 ⊕ 精确过滤                            │
+│  LangChain Retrievers 封装                                       │
+└─────────────────────────────┬────────────────────────────────────┘
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                  推理 Agent 层 (agent/langchain_agent.py)         │
+│  LangChain ReAct Agent（纯 LLM 推理，无规则降级）                   │
+│  Thought → Action → Observation → Final Answer                   │
+│  支持工具调用：检索相似工况、过滤查询等                             │
+└─────────────────────────────┬────────────────────────────────────┘
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                    双层输出层 (reporting/)                         │
+│  Markdown 报告 (人读) + CSV/JSON 条目 (机读)                       │
+│  相似工况仅在 Markdown 报告中展示，CSV/JSON 不含相似工况详情         │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-### LLM 表头映射器
+### 核心模块说明
 
-**文件**: `src/diagnosis_agent/parsers/header_mapper.py`
-**核心函数**: `map_headers_to_standard()`
+#### 1. CLI 入口 (`cli.py`)
 
-当输入文件表头与标准 8 列不完全匹配时，执行两层映射逻辑：
+- 主流程编排：输入解析 → 意图路由 → 检索 → 推理 → 报告生成
+- 模型配置状态展示：启动时统一展示 LLM、Embedding、InputRouter、向量存储的配置状态
+- 支持批量导入和批量诊断
+- 命令分发：`diagnose`、`load-data`、`search`、`stats`、`clear`、`config`
 
-1. **第一层 — 精确匹配**（`_try_exact_match()`）：通过内置 `COLUMN_CN_MAP`（中文→英文映射表，如"问题描述"→`problem_description`）和英文大小写归一化进行匹配。若精确匹配已覆盖全部 8 列，直接返回，不调用 LLM。
-2. **第二层 — LLM 智能映射**（`_llm_map_headers()`）：精确匹配不完全时，将未映射的表头连同标准 8 列定义和各列含义发送给 LLM（`ChatOpenAI`，`temperature=0.0`），要求 LLM 输出 JSON 映射。最终合并时**精确匹配优先**，LLM 结果仅补充未匹配部分。
+#### 2. 输入解析层 (`parsers/`)
 
-调用链：`parse_csv()` / `parse_xlsx()` → `map_headers_to_standard()` → `apply_header_mapping()` → 只保留标准 8 列数据。
+| 模块 | 功能 |
+|------|------|
+| `unified.py` | 统一解析入口，自动路由到 csv/xlsx/nl 解析器 |
+| `csv_parser.py` | CSV 文件解析，调用表头映射 |
+| `xlsx_parser.py` | XLSX 文件解析，调用表头映射 |
+| `nl_parser.py` | 自然语言解析（纯透传，由 LLM 推理） |
+| `header_mapper.py` | LLM 表头映射器（两层逻辑：精确匹配 + LLM 智能映射） |
+| `field_extractor.py` | 字段提取工具 |
+
+**LLM 表头映射流程**：
+1. **第一层 — 精确匹配**：通过内置 `COLUMN_CN_MAP`（中文→英文映射表）和英文大小写归一化进行匹配。若精确匹配已覆盖全部 8 列，直接返回，不调用 LLM。
+2. **第二层 — LLM 智能映射**：精确匹配不完全时，将未映射的表头连同标准 8 列定义和各列含义发送给 LLM（`ChatOpenAI`，`temperature=0.0`），要求 LLM 输出 JSON 映射。最终合并时**精确匹配优先**，LLM 结果仅补充未匹配部分。
+
+#### 3. 意图路由层 (`agent/input_router.py`)
+
+**InputRouter** 负责判断用户输入意图，支持以下意图类型：
+
+| 意图类型 | 说明 | 处理路径 |
+|----------|------|----------|
+| `DIAGNOSE` | 故障诊断 | 执行完整诊断流程 |
+| `BATCH_IMPORT` | 批量导入数据 | 调用 `load-data` 逻辑 |
+| `SEARCH` | 检索相似案例 | 调用 `search` 逻辑 |
+| `UNKNOWN` | 未知意图 | 回退到默认诊断流程 |
+
+**路由策略**：
+- 默认启用 LLM 意图分类（`input_router.enabled: true`）
+- 当 LLM 不可用时，自动回退到规则匹配（基于输入内容判断）
+
+#### 4. 向量存储层 (`storage/`)
+
+| 模块 | 功能 |
+|------|------|
+| `vector_store.py` | VectorStoreAdapter 抽象基类 + SearchResult 模型 |
+| `chroma_store.py` | ChromaVectorStore（ChromaDB 实现），支持记录的增删查 |
+
+**ChromaVectorStore** 特性：
+- 持久化存储到 `data/chroma/` 目录
+- 支持自定义 Embedding 模型
+- 批量添加记录（`add_records`）
+- 精确检索（`search`）和过滤检索（`search_with_filters`）
+
+#### 5. 检索层 (`retrieval/`)
+
+| 模块 | 功能 |
+|------|------|
+| `semantic.py` | SemanticRetriever（语义检索 + 阈值过滤） |
+| `filter.py` | FilterRetriever（车型/DTC/驱动代码精确过滤） |
+| `hybrid.py` | HybridRetriever（混合检索，加权合并语义检索和精确过滤结果） |
+| `langchain_retrievers.py` | LangChain Retrievers 封装，提供 LangChain 兼容的检索接口 |
+
+**混合检索算法**：
+1. 语义检索：使用 Embedding 模型计算相似度，返回 top_k 条
+2. 精确过滤：根据车型、DTC 码、驱动代码等字段进行精确匹配
+3. 结果合并：按配置权重（`semantic_weight`、`filter_weight`）合并去重，支持过滤扩倍率（`filter_expansion_ratio`）
+
+#### 6. 推理 Agent 层 (`agent/`)
+
+| 模块 | 功能 |
+|------|------|
+| `langchain_agent.py` | LangChainDiagnosticAgent（主推理 Agent） |
+| `react_agent.py` | ReActDiagnosticAgent（旧版，保留兼容） |
+| `prompts.py` | ReAct + CoT Prompt 模板 |
+| `tools.py` | DiagnosticTools（检索工具封装，供 Agent 调用） |
+| `input_router.py` | 输入意图路由 |
+
+**LangChainDiagnosticAgent 核心流程**：
+
+```
+输入描述 + 相似案例 → 构建 Prompt → Agent.invoke() → 解析结果
+         │                   │                 │
+         ▼                   ▼                 ▼
+    检索相似工况        系统 Prompt +          ReAct 循环
+    (HybridRetriever)   用户 Prompt        Thought → Action → Observation
+                                                    │
+                                                    ▼
+                                           解析最终 JSON 结果
+                                           (Pydantic 模型验证)
+```
+
+**工具列表**：
+- `search_similar_cases`: 检索相似工况
+- `filter_by_field`: 按字段精确过滤
+- `get_similar_case_details`: 获取相似工况详情
+
+#### 7. 模型层 (`models/`)
+
+| 模型 | 用途 |
+|------|------|
+| `incident.py` | IncidentRecord（标准 8 列数据模型）+ COLUMN_CN_MAP |
+| `input.py` | ParsedInput（统一输入模型）、InputIntent、InputType |
+| `diagnosis.py` | DiagnosticReport、DatabaseEntry、DiagnosticOutput（双层输出模型） |
+| `diagnostic_output.py` | 旧版输出模型（保留兼容） |
+
+**双层输出模型**：
+
+```
+DiagnosticOutput
+├── report: DiagnosticReport          # 第一层：人类可读报告
+│   ├── diagnosis_id
+│   ├── diagnosis_time
+│   ├── input_summary
+│   ├── has_similar_cases
+│   ├── similar_cases: list[SimilarCase]
+│   ├── findings: list[DiagnosticFinding]
+│   ├── recommended_countermeasure
+│   ├── react_steps: list[ReActStep]      # 思维链步骤
+│   ├── reasoning_narrative               # 推断过程叙述
+│   ├── tool_calls: list[ToolCallRecord]
+│   └── agent_version
+└── database_entry: DatabaseEntry     # 第二层：机器可录入条目
+    ├── diagnosis_id
+    ├── diagnosis_time
+    ├── problem_description
+    ├── root_cause
+    ├── countermeasure
+    ├── drive_code
+    ├── vehicle_type
+    ├── dashboard_indicator
+    ├── dtc_code
+    ├── fault_scenario
+    ├── diagnostic_confidence
+    ├── based_on_similar
+    └── similar_record_ids (仅内存中，CSV/JSON 不输出)
+```
+
+#### 8. 报告生成层 (`reporting/`)
+
+| 模块 | 功能 |
+|------|------|
+| `markdown.py` | Markdown 报告生成（包含思维链、工具调用、相似工况索引） |
+| `entries.py` | CSV/JSON 结构化条目生成（不含相似工况详情） |
+
+**输出内容差异**：
+
+| 内容 | Markdown 报告 | CSV/JSON 条目 |
+|------|---------------|---------------|
+| 思维链（ReAct 步骤） | ✅ 完整展示 | ❌ 不包含 |
+| 工具调用记录 | ✅ 完整展示 | ❌ 不包含 |
+| 推断过程叙述 | ✅ 完整展示 | ❌ 不包含 |
+| 诊断发现 | ✅ 完整展示 | ❌ 不包含 |
+| 相似工况索引 | ✅ 完整展示 | ❌ 不包含 |
+| 推荐对策 | ✅ 完整展示 | ✅ 包含 |
+| 标准 8 列数据 | ✅ 展示 | ✅ 完整包含 |
+| 诊断置信度 | ✅ 展示 | ✅ 包含 |
+| 相似记录 ID | ✅ 展示 | ❌ 不包含 |
+
+#### 9. 工具层 (`utils/`)
+
+| 模块 | 功能 |
+|------|------|
+| `embedding_wrapper.py` | Embedding 模型封装 |
+| `llm_factory.py` | LLM 实例工厂，统一创建 LLM 客户端 |
 
 ---
 
@@ -205,41 +398,59 @@ diagnosis_agent/
 │   ├── config.py                  # 配置加载（Settings Pydantic 模型）
 │   ├── models/
 │   │   ├── incident.py            # IncidentRecord（新 8 列）+ COLUMN_CN_MAP
-│   │   ├── input.py               # ParsedInput（统一输入模型）
-│   │   └── diagnosis.py           # DiagnosticReport, DatabaseEntry, DiagnosticOutput
+│   │   ├── input.py               # ParsedInput（统一输入模型）+ InputIntent/Type
+│   │   ├── diagnosis.py           # DiagnosticReport, DatabaseEntry, DiagnosticOutput
+│   │   └── diagnostic_output.py   # 旧版输出模型（兼容）
 │   ├── parsers/
 │   │   ├── unified.py             # 统一解析入口（自动路由 csv/xlsx/nl）
 │   │   ├── csv_parser.py          # CSV 解析
 │   │   ├── xlsx_parser.py         # XLSX 解析
-│   │   ├── nl_parser.py           # 自然语言解析（纯透传，由 LLM 推理）
-│   │   └── header_mapper.py       # ★ LLM 表头映射器（两层逻辑）
+│   │   ├── nl_parser.py           # 自然语言解析（纯透传）
+│   │   ├── header_mapper.py       # ★ LLM 表头映射器（两层逻辑）
+│   │   ├── field_extractor.py     # 字段提取工具
+│   │   └── __init__.py
 │   ├── storage/
 │   │   ├── vector_store.py        # VectorStoreAdapter 抽象 + SearchResult
-│   │   └── chroma_store.py        # ChromaVectorStore（ChromaDB 实现）
+│   │   ├── chroma_store.py        # ChromaVectorStore（ChromaDB 实现）
+│   │   └── __init__.py
 │   ├── retrieval/
-│   │   ├── semantic.py            # SemanticRetriever（语义检索 + 阈值过滤）
-│   │   ├── filter.py              # FilterRetriever（车型/DTC/驱动代码精确过滤）
-│   │   └── hybrid.py              # HybridRetriever（混合检索，加权合并）
+│   │   ├── semantic.py            # SemanticRetriever（语义检索）
+│   │   ├── filter.py              # FilterRetriever（精确过滤）
+│   │   ├── hybrid.py              # HybridRetriever（混合检索）
+│   │   ├── langchain_retrievers.py # LangChain 兼容检索接口
+│   │   └── __init__.py
 │   ├── agent/
-│   │   ├── react_agent.py         # ReActDiagnosticAgent（纯 LLM 推理）
+│   │   ├── langchain_agent.py     # ★ LangChainDiagnosticAgent（主推理 Agent）
+│   │   ├── react_agent.py         # ReActDiagnosticAgent（旧版兼容）
+│   │   ├── input_router.py        # ★ 输入意图路由
 │   │   ├── prompts.py             # ReAct + CoT Prompt 模板
-│   │   └── tools.py               # DiagnosticTools（检索工具封装）
-│   └── reporting/
-│       ├── markdown.py            # Markdown 报告生成
-│       └── entries.py             # CSV/JSON 结构化条目生成
+│   │   ├── tools.py               # DiagnosticTools（Agent 调用的工具）
+│   │   └── __init__.py
+│   ├── reporting/
+│   │   ├── markdown.py            # Markdown 报告生成
+│   │   ├── entries.py             # CSV/JSON 结构化条目生成
+│   │   └── __init__.py
+│   ├── utils/
+│   │   ├── embedding_wrapper.py   # Embedding 模型封装
+│   │   └── llm_factory.py         # LLM 实例工厂
+│   └── __init__.py
 ├── scripts/
-│   └── load_data.py               # 独立数据加载脚本
+│   ├── load_data.py               # 独立数据加载脚本
+│   └── backup_version.py          # 版本备份脚本
 ├── data/
 │   ├── samples/                   # 用户数据目录（空，含 .gitkeep）
+│   │   └── processed/             # 已处理文件目录（自动创建）
 │   └── chroma/                    # ChromaDB 持久化（运行时自动创建）
 ├── output/                        # 诊断报告输出（运行时自动创建）
+├── docs/
+│   └── review_20260723.md         # 评审文档
 └── tests/
     ├── conftest.py
-    ├── test_models.py
-    ├── test_parsers.py
-    ├── test_storage_retrieval.py
-    ├── test_agent_report.py
-    └── test_integration.py
+    ├── test_models.py             # 模型测试
+    ├── test_parsers.py            # 解析器测试
+    ├── test_storage_retrieval.py  # 存储检索测试
+    ├── test_agent_report.py       # Agent 报告测试
+    └── test_integration.py        # 集成测试
 ```
 
 ---

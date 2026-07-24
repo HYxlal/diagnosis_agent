@@ -7,6 +7,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from .incident import IncidentRecord
+
 
 class InputType(str, Enum):
     """输入类型枚举"""
@@ -59,6 +61,12 @@ class ParsedInput(BaseModel):
     search_query: Optional[str] = Field(
         None,
         description="LLM 提取的检索用 query（仅 diagnostic_query 有值，去除指令性语言）",
+    )
+
+    # 字段提取结果（由 FieldExtractor 生成）
+    field_extraction: Optional[IncidentRecord] = Field(
+        None,
+        description="自然语言输入的字段提取结果（分类到 8 个标准字段）",
     )
 
     def is_bulk(self) -> bool:

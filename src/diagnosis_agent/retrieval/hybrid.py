@@ -1,7 +1,9 @@
-"""混合检索工具
+"""[DEPRECATED] 混合检索工具
 
-结合语义检索和精确过滤，综合排序。
+已废弃：请使用 langchain_retrievers.py 中的 ChromaVectorRetriever
+保留此文件仅用于兼容旧版本代码（react_agent.py）。
 
+原说明：结合语义检索和精确过滤，综合排序。
 得分策略：加权 sum（非 max）
 - 同一记录被两路检索命中时，得分 = semantic_score * semantic_weight + filter_score * filter_weight
 - filter_score 固定为 1.0，语义 score 为余弦相似度（0~1），量纲一致

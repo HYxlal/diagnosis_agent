@@ -1,0 +1,76 @@
+# ============================================
+# diagnosis_agent 配置文件
+# ============================================
+
+app:
+  name: "diagnosis_agent"
+  version: "0.1.0"
+
+# LLM 配置（阿里云通义千问 Qwen）
+llm:
+  model: "${LLM_MODEL_NAME:qwen-plus}"
+  temperature: 0.3
+  max_tokens: 4096
+  api_key: "${DASHSCOPE_API_KEY}"
+  api_base: "${LLM_API_BASE:https://dashscope.aliyuncs.com/compatible-mode/v1}"
+
+# Embedding 配置（阿里云通义千问 Embedding）
+embedding:
+  model: "${EMBEDDING_MODEL:text-embedding-v2}"
+  api_key: "${DASHSCOPE_API_KEY}"
+  api_base: "${LLM_API_BASE:https://dashscope.aliyuncs.com/compatible-mode/v1}"
+
+# 向量数据库配置
+vector_store:
+  type: "chroma"              # 目前支持 chroma
+  persist_dir: "data/chroma"  # ChromaDB 持久化目录
+  collection_name: "incidents"
+
+# 检索配置
+retrieval:
+  semantic:
+    top_k: 5                 # 语义检索返回数量
+    score_threshold: 0.3     # 相似度阈值（低于此值不返回）
+  filter:
+    default_top_k: 10
+    # 可配置的过滤字段列表 — filter_by() 接受这些字段的任意组合
+    # 新增过滤字段只需在此列表追加即可，无需改代码
+    filter_fields:
+      - vehicle_type
+      - drive_code
+      - dtc_code
+      - dashboard_indicator
+      - fault_scenario
+  hybrid:
+    semantic_weight: 0.7     # 语义检索权重
+    filter_weight: 0.3       # 精确过滤权重
+    filter_expansion_ratio: 2  # 过滤检索扩倍率（filter_top_k = top_k * 此值）
+
+# Agent 工具默认参数
+tools:
+  search_top_k: 5            # search_similar_incidents 默认返回数量
+  filter_top_k: 10           # filter_by_vehicle_type 默认返回数量
+
+# InputRouter 意图路由配置
+input_router:
+  enabled: true              # 是否启用意图路由（关闭则所有输入走默认诊断流程）
+  model: "${INPUT_ROUTER_MODEL:qwen-turbo}"  # 意图分类用的轻量模型
+  temperature: 0.1           # 低温度保证分类稳定性
+
+# Agent 配置
+agent:
+  max_iterations: 10         # ReAct 最大迭代次数
+  verbose: true
+  # 有相似工况时的阈值：相似度 >= 此值走"有相似工况"路径
+  similarity_threshold: 0.65
+
+# 报告配置
+report:
+  output_dir: "output"       # 报告输出目录
+  markdown_template: "default"
+
+# 路径配置
+paths:
+  data_dir: "data"
+  samples_dir: "data/samples"
+  output_dir: "output"

@@ -28,7 +28,7 @@ from .reporting.entries import generate_both as generate_db_entries
 from .reporting.markdown import generate_markdown_report
 from .storage.chroma_store import ChromaVectorStore
 
-SUPPORTED_EXTENSIONS = {".xlsx", ".csv"}
+SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
 PROCESSED_DIR_NAME = "processed"
 
 app = typer.Typer(

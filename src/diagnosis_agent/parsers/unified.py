@@ -29,7 +29,7 @@ def detect_input_type(text: str, file_path: Optional[str] = None) -> InputType:
     """
     if file_path:
         ext = Path(file_path).suffix.lower()
-        if ext == ".xlsx":
+        if ext == ".xlsx" or ext == ".xls":
             return InputType.XLSX
         elif ext == ".csv":
             return InputType.CSV
@@ -61,7 +61,7 @@ def parse_input(
             raise FileNotFoundError(f"文件不存在: {file_path}")
 
         ext = path.suffix.lower()
-        if ext == ".xlsx":
+        if ext == ".xlsx" or ext == ".xls":
             result = parse_xlsx(path)
         elif ext == ".csv":
             result = parse_csv(path)

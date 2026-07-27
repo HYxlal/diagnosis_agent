@@ -31,7 +31,7 @@ def parse_xlsx(file_path: str | Path, sheet_name: Optional[str] = None) -> Parse
     file_path = Path(file_path)
     df = pd.read_excel(file_path, sheet_name=sheet_name)
 
-    # 处理 pandas 3.x 返回 dict 的情况（当文件包含多个 sheet 时）
+    # pandas 3.x 在某些情况下返回 dict（多 sheet 时）
     if isinstance(df, dict):
         if df:
             df = next(iter(df.values()))

@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.retrievers import BaseRetriever
 
 from ..config import Settings
@@ -62,6 +62,17 @@ class LangChainDiagnosticAgent:
         self._tools = DiagnosticTools(
             retriever=self._retriever,
             settings=settings,
+        )
+        self._agent = self._build_agent()
+
+    def _build_agent(self):
+        """构建并缓存 Agent"""
+        system_prompt = self._build_system_prompt()
+        tools = self._tools.get_tool_list()
+        return create_agent(
+            model=self._llm,
+            tools=tools,
+            system_prompt=system_prompt,
         )
 
     def _init_llm(self):
@@ -171,26 +182,16 @@ class LangChainDiagnosticAgent:
         similar_cases: list[dict],
         has_similar: bool,
     ) -> tuple[dict, list[ToolCallRecord], list]:
-        """使用 langchain.agents.create_agent 执行 Agent 循环"""
-        system_prompt = self._build_system_prompt()
-
+        """使用缓存的 Agent 执行循环"""
         if has_similar:
             cases_text = format_similar_cases_for_prompt(similar_cases)
             user_prompt = build_similar_case_prompt(description=description, similar_cases_text=cases_text)
         else:
             user_prompt = build_no_similar_case_prompt(description=description)
 
-        tools = self._tools.get_tool_list()
-
-        agent = create_agent(
-            model=self._llm,
-            tools=tools,
-            system_prompt=system_prompt,
-        )
-
         logger.info("开始 Agent 循环")
         try:
-            result = agent.invoke({
+            result = self._agent.invoke({
                 "messages": [
                     {"role": "user", "content": user_prompt}
                 ]
@@ -245,37 +246,87 @@ class LangChainDiagnosticAgent:
 
 confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定，0.5 以下为推测。"""
 
-    def _extract_tool_calls(self, messages) -> list[ToolCallRecord]:
-        """从消息列表中提取工具调用记录"""
+    def _extract_tool_calls(self, messages: list[BaseMessage]) -> list[ToolCallRecord]:
+        """从消息列表中提取工具调用记录，关联 ToolMessage 结果"""
         tool_calls = []
+        tool_call_map = {}
+
         for msg in messages:
             if hasattr(msg, 'tool_calls') and msg.tool_calls:
                 for tc in msg.tool_calls:
+                    tc_id = tc.get('id', '')
                     tc_record = ToolCallRecord(
                         tool_name=tc.get('name', ''),
                         parameters=tc.get('args', {}),
                         result={},
                         duration_ms=0,
                     )
+                    if tc_id:
+                        tool_call_map[tc_id] = tc_record
                     tool_calls.append(tc_record)
+
+        for msg in messages:
+            if isinstance(msg, ToolMessage) and hasattr(msg, 'tool_call_id'):
+                tc_id = msg.tool_call_id
+                if tc_id in tool_call_map:
+                    result_content = msg.content
+                    if isinstance(result_content, str):
+                        try:
+                            result_content = json.loads(result_content)
+                        except json.JSONDecodeError:
+                            pass
+                    tool_call_map[tc_id].result = result_content if result_content else {}
+
         return tool_calls
 
-    def _extract_react_steps(self, messages) -> list[ReActStep]:
-        """从消息列表中提取推理步骤"""
+    def _extract_react_steps(self, messages: list[BaseMessage]) -> list[ReActStep]:
+        """从消息列表中提取推理步骤，区分消息类型"""
         steps = []
         step_num = 1
+        pending_step = None
+
         for msg in messages:
-            content = getattr(msg, 'content', '')
-            if content and not isinstance(content, dict) and content != 'null':
-                step = ReActStep(
-                    step=step_num,
-                    thought=content,
-                    action='',
-                    action_input={},
-                    observation='',
-                )
-                steps.append(step)
-                step_num += 1
+            if isinstance(msg, HumanMessage):
+                continue
+
+            elif isinstance(msg, AIMessage):
+                content = getattr(msg, 'content', '')
+                if content and not isinstance(content, dict) and content != 'null':
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        action_name = msg.tool_calls[0].get('name', '') if msg.tool_calls else ''
+                        action_input = msg.tool_calls[0].get('args', {}) if msg.tool_calls else {}
+                        pending_step = ReActStep(
+                            step=step_num,
+                            thought=content,
+                            action=action_name,
+                            action_input=action_input,
+                            observation='',
+                        )
+                        steps.append(pending_step)
+                        step_num += 1
+                    else:
+                        steps.append(ReActStep(
+                            step=step_num,
+                            thought=content,
+                            action='',
+                            action_input={},
+                            observation='',
+                        ))
+                        step_num += 1
+
+            elif isinstance(msg, ToolMessage):
+                if pending_step is not None and msg.tool_call_id:
+                    result_content = msg.content
+                    if isinstance(result_content, str):
+                        try:
+                            result_content = json.loads(result_content)
+                        except json.JSONDecodeError:
+                            pass
+                    observation = str(result_content) if result_content else ''
+                    if pending_step.action:
+                        pending_step.observation = observation
+                        pending_step = None
+
         return steps
 
     def _parse_final_result(self, last_message) -> dict:

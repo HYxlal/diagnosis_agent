@@ -26,6 +26,7 @@ from .models.input import InputIntent, InputType
 from .parsers.unified import parse_input
 from .reporting.entries import generate_both as generate_db_entries
 from .reporting.markdown import generate_markdown_report
+from .storage.chroma_store import ChromaVectorStore
 
 SUPPORTED_EXTENSIONS = {".xlsx", ".csv"}
 PROCESSED_DIR_NAME = "processed"

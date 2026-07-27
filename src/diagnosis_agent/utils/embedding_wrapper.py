@@ -10,14 +10,19 @@ import logging
 from typing import List, Optional
 
 import requests
+from langchain_core.embeddings import Embeddings
 
 from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 
 
-class DashScopeEmbeddings:
-    """兼容阿里云 DashScope embedding API 的包装器"""
+class DashScopeEmbeddings(Embeddings):
+    """兼容阿里云 DashScope embedding API 的包装器
+
+    继承 LangChain Embeddings 接口，确保类型兼容性。
+    失败时抛出异常，便于上层处理。
+    """
 
     def __init__(
         self,
@@ -32,11 +37,14 @@ class DashScopeEmbeddings:
             self.api_base = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """批量嵌入文档"""
+        """批量嵌入文档
+
+        Raises:
+            RuntimeError: 当 API 调用失败时抛出
+        """
         if not texts:
             return []
 
-        # 阿里云 API 限制每次最多 25 条
         batch_size = 25
         all_embeddings = []
 
@@ -48,12 +56,22 @@ class DashScopeEmbeddings:
         return all_embeddings
 
     def embed_query(self, text: str) -> List[float]:
-        """嵌入单个查询文本"""
+        """嵌入单个查询文本
+
+        Raises:
+            RuntimeError: 当 API 调用失败时抛出
+        """
         result = self._embed_batch([text])
-        return result[0] if result else []
+        if not result:
+            raise RuntimeError("Embedding API 调用失败，无法获取查询向量")
+        return result[0]
 
     def _embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """调用阿里云 API 嵌入一批文本"""
+        """调用阿里云 API 嵌入一批文本
+
+        Raises:
+            RuntimeError: 当 API 调用失败时抛出
+        """
         url = f"{self.api_base}/embeddings"
 
         headers = {
@@ -61,7 +79,6 @@ class DashScopeEmbeddings:
             "Authorization": f"Bearer {self.api_key}",
         }
 
-        # 阿里云 API 要求输入格式
         body = {
             "model": self.model,
             "input": texts,
@@ -83,12 +100,11 @@ class DashScopeEmbeddings:
                         embeddings.append(np.array(embedding).tolist())
                 return embeddings
 
-            logger.error(f"Embedding API 响应格式异常: {data}")
-            return []
+            raise RuntimeError(f"Embedding API 响应格式异常: {data}")
 
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             logger.error(f"Embedding API 调用失败: {e}")
-            return []
+            raise RuntimeError(f"Embedding API 调用失败: {e}") from e
 
     async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
         """异步批量嵌入文档"""

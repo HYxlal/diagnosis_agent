@@ -127,10 +127,10 @@ class DiagnosticTools:
     def _get_incident_detail_impl(self, record_id: str) -> Optional[dict]:
         """获取工单详情实现"""
         try:
-            if hasattr(self.retriever, 'vectorstore'):
-                vectorstore = self.retriever.vectorstore
-                if hasattr(vectorstore, '_collection'):
-                    result = vectorstore._collection.get(ids=[record_id])
+            if hasattr(self.retriever, 'store'):
+                store = self.retriever.store
+                if hasattr(store, '_collection'):
+                    result = store._collection.get(ids=[record_id])
                     if result["ids"] and result["metadatas"]:
                         record = IncidentRecord.from_dict(result["metadatas"][0])
                         return record.to_dict()

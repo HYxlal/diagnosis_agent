@@ -199,8 +199,8 @@ def create_chroma_retriever() -> ChromaVectorRetriever:
             persist_dir=persist_dir,
             collection_name="incidents",
             embedding_model=settings.embedding.model,
-            api_key=settings.llm.api_key,
-            api_base=settings.llm.api_base,
+            api_key=settings.embedding.api_key or None,
+            api_base=settings.embedding.api_base or None,
         )
         _store_cache[persist_dir] = store
 

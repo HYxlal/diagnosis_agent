@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Optional
 
+from langchain_core.documents import Document
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
@@ -110,12 +111,28 @@ class DiagnosticTools:
         return [self._doc_to_dict(doc) for doc in docs]
 
     def _filter_by_vehicle_type_impl(self, vehicle_type: str, top_k: Optional[int] = None) -> list[dict]:
-        """按车型过滤实现"""
+        """按车型过滤实现（使用纯 metadata 过滤，不走 embedding 路径）"""
         k = top_k or self._default_filter_top_k
 
-        if hasattr(self.retriever, 'search_with_filters'):
+        if hasattr(self.retriever, 'store') and hasattr(self.retriever.store, 'filter'):
+            results = self.retriever.store.filter(
+                filters={"vehicle_type": vehicle_type},
+                top_k=k,
+            )
+            docs = []
+            for r in results:
+                metadata = r.metadata.copy()
+                metadata["id"] = r.id
+                metadata["score"] = r.score
+                docs.append(
+                    Document(
+                        page_content=r.content,
+                        metadata=metadata,
+                    )
+                )
+        elif hasattr(self.retriever, 'search_with_filters'):
             docs = self.retriever.search_with_filters(
-                query="",
+                query=vehicle_type,
                 vehicle_type=vehicle_type,
                 top_k=k,
             )

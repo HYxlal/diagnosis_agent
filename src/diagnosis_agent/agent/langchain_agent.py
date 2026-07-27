@@ -181,7 +181,7 @@ class LangChainDiagnosticAgent:
         description: str,
         similar_cases: list[dict],
         has_similar: bool,
-    ) -> tuple[dict, list[ToolCallRecord], list]:
+    ) -> tuple[dict, list[ToolCallRecord], list[ReActStep]]:
         """使用缓存的 Agent 执行循环"""
         if has_similar:
             cases_text = format_similar_cases_for_prompt(similar_cases)
@@ -280,7 +280,14 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
         return tool_calls
 
     def _extract_react_steps(self, messages: list[BaseMessage]) -> list[ReActStep]:
-        """从消息列表中提取推理步骤，区分消息类型"""
+        """从消息列表中提取推理步骤，区分消息类型
+
+        处理逻辑：
+        - AIMessage + tool_calls → Thought + Action，等待 ToolMessage
+        - ToolMessage → 填充上一步的 Observation
+        - AIMessage (无 tool_calls) → 纯 Thought 步骤
+        - HumanMessage → 跳过
+        """
         steps = []
         step_num = 1
         pending_step = None
@@ -291,31 +298,33 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
 
             elif isinstance(msg, AIMessage):
                 content = getattr(msg, 'content', '')
-                if content and not isinstance(content, dict) and content != 'null':
-                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                        action_name = msg.tool_calls[0].get('name', '') if msg.tool_calls else ''
-                        action_input = msg.tool_calls[0].get('args', {}) if msg.tool_calls else {}
-                        pending_step = ReActStep(
-                            step=step_num,
-                            thought=content,
-                            action=action_name,
-                            action_input=action_input,
-                            observation='',
-                        )
-                        steps.append(pending_step)
-                        step_num += 1
-                    else:
-                        steps.append(ReActStep(
-                            step=step_num,
-                            thought=content,
-                            action='',
-                            action_input={},
-                            observation='',
-                        ))
-                        step_num += 1
+                if not content or isinstance(content, dict) or content == 'null':
+                    continue
+
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    action_name = msg.tool_calls[0].get('name', '') if msg.tool_calls else ''
+                    action_input = msg.tool_calls[0].get('args', {}) if msg.tool_calls else {}
+                    pending_step = ReActStep(
+                        step=step_num,
+                        thought=content,
+                        action=action_name,
+                        action_input=action_input,
+                        observation='',
+                    )
+                    steps.append(pending_step)
+                    step_num += 1
+                else:
+                    steps.append(ReActStep(
+                        step=step_num,
+                        thought=content,
+                        action='',
+                        action_input={},
+                        observation='',
+                    ))
+                    step_num += 1
 
             elif isinstance(msg, ToolMessage):
-                if pending_step is not None and msg.tool_call_id:
+                if pending_step is not None and pending_step.action:
                     result_content = msg.content
                     if isinstance(result_content, str):
                         try:
@@ -323,9 +332,8 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
                         except json.JSONDecodeError:
                             pass
                     observation = str(result_content) if result_content else ''
-                    if pending_step.action:
-                        pending_step.observation = observation
-                        pending_step = None
+                    pending_step.observation = observation
+                    pending_step = None
 
         return steps
 

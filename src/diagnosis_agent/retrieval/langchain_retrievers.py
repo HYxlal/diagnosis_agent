@@ -190,19 +190,21 @@ def create_chroma_retriever() -> ChromaVectorRetriever:
     """创建 Chroma 向量检索器"""
     settings = get_settings()
     persist_dir = settings.vector_store.persist_dir
+    collection_name = settings.vector_store.collection_name
 
-    # 检查缓存
-    if persist_dir in _store_cache:
-        store = _store_cache[persist_dir]
+    # 缓存键：persist_dir + collection_name，避免不同集合共享同一 store
+    cache_key = f"{persist_dir}:{collection_name}"
+    if cache_key in _store_cache:
+        store = _store_cache[cache_key]
     else:
         store = ChromaVectorStore(
             persist_dir=persist_dir,
-            collection_name="incidents",
+            collection_name=collection_name,
             embedding_model=settings.embedding.model,
             api_key=settings.embedding.api_key or None,
             api_base=settings.embedding.api_base or None,
         )
-        _store_cache[persist_dir] = store
+        _store_cache[cache_key] = store
 
     return ChromaVectorRetriever(
         store=store,

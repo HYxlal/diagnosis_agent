@@ -186,7 +186,7 @@ class DiagnosticTools:
     # ------------------------------------------------------------------
 
     def get_tool_list(self) -> list:
-        """返回工具列表（供 create_react_agent 使用）
+        """返回工具列表（供 create_agent 使用）
 
         使用 StructuredTool.from_function 动态创建工具，
         正确绑定实例方法。

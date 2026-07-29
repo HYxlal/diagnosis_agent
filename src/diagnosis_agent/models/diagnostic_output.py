@@ -11,13 +11,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-
-class DiagnosticFinding(BaseModel):
-    """诊断发现"""
-    title: str = Field(description="发现标题")
-    description: str = Field(description="详细描述")
-    confidence: float = Field(description="置信度 0.0-1.0")
-    evidence: list[str] = Field(description="证据列表")
+from .diagnosis import DiagnosticFinding
 
 
 class DiagnosticResult(BaseModel):

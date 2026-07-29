@@ -35,3 +35,4 @@ rank_bm25>=0.2.2
 
 # Testing
 pytest>=7.0
+pytest-cov>=4.0

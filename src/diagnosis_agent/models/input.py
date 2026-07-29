@@ -172,19 +172,7 @@ class ParsedInput(BaseModel):
         return len(self.bulk_records) > 0
 
     def get_entity(self, field: str, default: str = "") -> str:
-        """从 entities 中安全获取实体字段值
-
-        优先使用 entities，回退到 field_extraction（兼容旧路径）。
-        """
+        """从 entities 中安全获取实体字段值"""
         if self.entities:
             return getattr(self.entities, field, default) or default
-        if self.field_extraction:
-            mapping = {
-                "dtc_code": self.field_extraction.dtc_code,
-                "project": self.field_extraction.vehicle_type,
-                "component": self.field_extraction.component,
-                "working_condition": self.field_extraction.fault_scenario,
-                "software_version": self.field_extraction.software_version,
-            }
-            return mapping.get(field, default) or default
         return default

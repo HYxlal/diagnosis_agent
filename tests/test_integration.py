@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from diagnosis_agent.models.incident import IncidentRecord
 from diagnosis_agent.storage.chroma_store import ChromaVectorStore
-from diagnosis_agent.retrieval.hybrid import HybridRetriever
+from diagnosis_agent.retrieval.langchain_retrievers import ChromaVectorRetriever
 from diagnosis_agent.parsers.unified import parse_input
 from diagnosis_agent.config import Settings
 
@@ -57,16 +57,15 @@ class TestEndToEnd:
         store.add_records(records)
         assert store.count() == 2
 
-        # 3. 检索
-        retriever = HybridRetriever(store, score_threshold=0.0)
-        results = retriever.retrieve(
-            query="发动机故障灯 怠速",
-            top_k=2,
+        # 3. 检索（使用 ChromaVectorRetriever 替代废弃的 HybridRetriever）
+        retriever = ChromaVectorRetriever(
+            store=store, top_k=2, score_threshold=0.0
         )
-        assert len(results) > 0
+        docs = retriever.invoke("发动机故障灯 怠速")
+        assert len(docs) > 0
 
         # 4. 验证结果
-        top = results[0]
+        top = docs[0]
         assert top.metadata.get("problem_description") is not None
         assert top.metadata.get("vehicle_type") is not None
 
@@ -82,12 +81,12 @@ class TestEndToEnd:
         assert "dtc_code" in first
 
     @pytest.mark.skipif(
-        not os.getenv("OPENAI_API_KEY"),
-        reason="需要 OPENAI_API_KEY 才能测试 LLM 推理路径",
+        not os.getenv("DASHSCOPE_API_KEY"),
+        reason="需要 DASHSCOPE_API_KEY 才能测试 LLM 推理路径",
     )
     def test_full_diagnosis(self, tmp_path):
         """测试完整诊断流程（需要 LLM）"""
-        from diagnosis_agent.agent.react_agent import ReActDiagnosticAgent
+        from diagnosis_agent.agent.langchain_agent import LangChainDiagnosticAgent
         from diagnosis_agent.reporting.markdown import generate_markdown_report
 
         store = ChromaVectorStore(
@@ -109,9 +108,8 @@ class TestEndToEnd:
         ]
         store.add_records(records)
 
-        retriever = HybridRetriever(store, score_threshold=0.0)
         settings = Settings()
-        agent = ReActDiagnosticAgent(settings=settings, retriever=retriever)
+        agent = LangChainDiagnosticAgent(settings=settings)
 
         parsed = parse_input(text="发动机故障灯亮了，怠速不稳")
         output = agent.diagnose(parsed)

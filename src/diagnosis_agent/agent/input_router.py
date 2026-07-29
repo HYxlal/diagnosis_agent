@@ -221,8 +221,6 @@ class InputRouter:
                             working_condition=record.fault_scenario or "",
                             software_version="",
                         )
-                        # 兼容：同时写入 field_extraction（文件解析路径可能依赖）
-                        parsed_input.field_extraction = record
                     except Exception as e:
                         logger.warning(f"字段提取失败: {e}")
 

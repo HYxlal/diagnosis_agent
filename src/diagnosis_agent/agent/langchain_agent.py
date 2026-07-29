@@ -95,10 +95,11 @@ class LangChainDiagnosticAgent:
 
     def _init_llm(self):
         """初始化 LLM"""
-        return create_llm()
+        return create_llm(settings=self.settings)
 
     def _init_retriever(self) -> BaseRetriever:
         """初始化检索器"""
+        # create_chroma_retriever 用全局 settings，此处仅记录依赖
         return create_chroma_retriever()
 
     def register_working_condition_converter(self, converter) -> None:
@@ -255,27 +256,20 @@ class LangChainDiagnosticAgent:
 
         confidence = reasoning_result.get("confidence", 0.3)
 
-        # 从 entities / field_extraction / bulk_records 中获取字段
+        # 从 entities / bulk_records 中获取字段（field_extraction 已废弃）
         entities = parsed_input.entities
-        field_extraction = parsed_input.field_extraction
 
         problem_desc = description[:500]
-        if field_extraction and field_extraction.problem_description:
-            problem_desc = field_extraction.problem_description
 
         dtc_code = ""
         if entities and entities.dtc_code:
             dtc_code = ", ".join(entities.dtc_code)
-        elif field_extraction and field_extraction.dtc_code:
-            dtc_code = field_extraction.dtc_code
         else:
             dtc_code = self._extract_from_records(parsed_input, "dtc_code")
 
         vehicle_type = ""
         if entities and entities.project:
             vehicle_type = entities.project
-        elif field_extraction and field_extraction.vehicle_type:
-            vehicle_type = field_extraction.vehicle_type
         else:
             vehicle_type = self._extract_from_records(parsed_input, "vehicle_type")
 
@@ -286,22 +280,12 @@ class LangChainDiagnosticAgent:
         fault_scenario = ""
         if entities and entities.working_condition:
             fault_scenario = entities.working_condition
-        elif field_extraction and field_extraction.fault_scenario:
-            fault_scenario = field_extraction.fault_scenario
         else:
             fault_scenario = self._extract_from_records(parsed_input, "fault_scenario")
 
-        drive_code = ""
-        if field_extraction and field_extraction.drive_code:
-            drive_code = field_extraction.drive_code
-        else:
-            drive_code = self._extract_from_records(parsed_input, "drive_code")
+        drive_code = self._extract_from_records(parsed_input, "drive_code")
 
-        dashboard_indicator = ""
-        if field_extraction and field_extraction.dashboard_indicator:
-            dashboard_indicator = field_extraction.dashboard_indicator
-        else:
-            dashboard_indicator = self._extract_from_records(parsed_input, "dashboard_indicator")
+        dashboard_indicator = self._extract_from_records(parsed_input, "dashboard_indicator")
 
         database_entry = DatabaseEntry(
             diagnosis_id=diagnosis_id,

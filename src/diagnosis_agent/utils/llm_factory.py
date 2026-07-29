@@ -21,6 +21,7 @@ def create_llm(
     max_tokens: Optional[int] = None,
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
+    settings=None,
 ) -> ChatOpenAI:
     """创建 LLM 实例
 
@@ -30,11 +31,13 @@ def create_llm(
         max_tokens: 最大生成长度
         api_key: API Key
         api_base: API 基础 URL
+        settings: 可选的 Settings 实例（默认用全局单例）
 
     Returns:
         ChatOpenAI 实例
     """
-    settings = get_settings()
+    if settings is None:
+        settings = get_settings()
 
     llm_model = model or settings.llm.model
     llm_temperature = temperature if temperature is not None else settings.llm.temperature

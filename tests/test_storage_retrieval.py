@@ -1,14 +1,16 @@
 """测试存储和检索
 
 chromadb 为必需依赖，不再跳过。
+使用 langchain_retrievers 中的 ChromaVectorRetriever（替代已废弃的 Hybrid/Semantic/Filter Retriever）。
 """
 
 import pytest
 
 from diagnosis_agent.storage.chroma_store import ChromaVectorStore
-from diagnosis_agent.retrieval.hybrid import HybridRetriever
-from diagnosis_agent.retrieval.semantic import SemanticRetriever
-from diagnosis_agent.retrieval.filter import FilterRetriever
+from diagnosis_agent.retrieval.langchain_retrievers import (
+    ChromaVectorRetriever,
+    document_to_record,
+)
 from diagnosis_agent.models.incident import IncidentRecord
 
 
@@ -64,45 +66,73 @@ class TestChromaVectorStore:
         assert store.count() == 0
 
 
-class TestRetrievers:
-    """测试检索器"""
+class TestChromaVectorRetriever:
+    """测试 LangChain 兼容检索器（替代废弃的 Semantic/Filter/Hybrid Retriever）"""
 
-    def test_semantic_retriever(self, tmp_path, sample_records):
+    def test_semantic_search(self, tmp_path, sample_records):
+        """语义检索（替代原 SemanticRetriever）"""
         store = ChromaVectorStore(
             persist_dir=str(tmp_path / "chroma"),
             collection_name="test_semantic",
         )
         store.add_records(sample_records)
 
-        retriever = SemanticRetriever(store, score_threshold=0.0)
-        results = retriever.search(query="发动机故障灯", top_k=3)
-        assert len(results) > 0
+        retriever = ChromaVectorRetriever(
+            store=store, top_k=3, score_threshold=0.0
+        )
+        docs = retriever.invoke("发动机故障灯")
+        assert len(docs) > 0
+        assert len(docs) <= 3
 
-    def test_filter_retriever(self, tmp_path, sample_records):
+    def test_filter_by_vehicle_type(self, tmp_path, sample_records):
+        """纯 metadata 过滤（替代原 FilterRetriever）"""
         store = ChromaVectorStore(
             persist_dir=str(tmp_path / "chroma"),
             collection_name="test_filter",
         )
         store.add_records(sample_records)
 
-        retriever = FilterRetriever(store)
-        results = retriever.get_by_vehicle_type("SUV-X1")
+        results = store.filter(filters={"vehicle_type": "SUV-X1"})
         assert len(results) > 0
         for r in results:
             assert r.metadata.get("vehicle_type") == "SUV-X1"
 
-    def test_hybrid_retriever(self, tmp_path, sample_records):
+    def test_search_with_filters(self, tmp_path, sample_records):
+        """带过滤条件的语义检索（替代原 HybridRetriever）"""
         store = ChromaVectorStore(
             persist_dir=str(tmp_path / "chroma"),
             collection_name="test_hybrid",
         )
         store.add_records(sample_records)
 
-        retriever = HybridRetriever(store, score_threshold=0.0)
-        results = retriever.retrieve(
+        retriever = ChromaVectorRetriever(
+            store=store, top_k=3, score_threshold=0.0
+        )
+        docs = retriever.search_with_filters(
             query="发动机故障灯 怠速",
             vehicle_type="SUV-X1",
             top_k=3,
         )
-        assert len(results) > 0
-        assert len(results) <= 3
+        assert len(docs) > 0
+        assert len(docs) <= 3
+
+    def test_document_to_record(self, tmp_path, sample_records):
+        """Document → IncidentRecord 转换"""
+        from langchain_core.documents import Document
+
+        store = ChromaVectorStore(
+            persist_dir=str(tmp_path / "chroma"),
+            collection_name="test_doc_convert",
+        )
+        store.add_records(sample_records)
+
+        results = store.search(query="发动机故障灯", top_k=1)
+        assert results
+        meta = results[0].metadata.copy()
+        meta["id"] = results[0].id
+        meta["score"] = results[0].score
+        doc = Document(page_content=results[0].content, metadata=meta)
+
+        record = document_to_record(doc)
+        assert isinstance(record, IncidentRecord)
+        assert record.problem_description

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -73,7 +74,6 @@ def generate_markdown_report(
                 lines.append("")
 
                 if step.action_input:
-                    import json
                     lines.append("**Action Input**:")
                     lines.append(f"""```json
 {json.dumps(step.action_input, ensure_ascii=False, indent=2)}
@@ -99,7 +99,6 @@ def generate_markdown_report(
         lines.append("| # | 工具名称 | 参数 | 耗时(ms) | 时间 |")
         lines.append("|---|----------|------|----------|------|")
 
-        import json
         for i, tc in enumerate(report.tool_calls, 1):
             params_str = json.dumps(tc.parameters, ensure_ascii=False)
             if len(params_str) > 80:

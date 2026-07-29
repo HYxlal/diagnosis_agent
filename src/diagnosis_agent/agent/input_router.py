@@ -146,20 +146,25 @@ class InputRouter:
     ) -> ParsedInput:
         """对 ParsedInput 进行意图分类和路由
 
+        路由优先级（短路）：
+        1. 文件输入（xlsx/csv）→ DIAGNOSTIC_QUERY（批量工单数据，无需 LLM 分类）
+        2. 工况文件扩展名（.asc/.blf/.mdf）→ WORKING_CONDITION_FILE
+        3. 纯文本输入 → LLM 分类（LLM 不可用时回退到规则匹配）
+
         Args:
             parsed_input: 原始解析结果
 
         Returns:
             带有 intent 和 search_query 的 ParsedInput（原地修改并返回）
         """
-        # 文件输入（xlsx/csv）默认为 diagnostic_query（批量工单数据）
+        # 1. 文件输入（xlsx/csv）默认为 diagnostic_query（批量工单数据）
         if parsed_input.input_type in (InputType.XLSX, InputType.CSV):
             parsed_input.intent = InputIntent.DIAGNOSTIC_QUERY
             parsed_input.search_query = parsed_input.description
             logger.info("文件输入，意图=diagnostic_query（默认）")
             return parsed_input
 
-        # 工况文件检测：非标准扩展名
+        # 2. 工况文件检测：非标准扩展名
         if parsed_input.source_file:
             from pathlib import Path
             ext = Path(parsed_input.source_file).suffix.lower()
@@ -168,7 +173,7 @@ class InputRouter:
                 logger.info(f"检测到工况文件扩展名 {ext}，意图=working_condition_file")
                 return parsed_input
 
-        # 纯文本输入：用 LLM 分类
+        # 3. 纯文本输入：用 LLM 分类（不可用时回退规则）
         text = parsed_input.description or parsed_input.raw_input
         if not text:
             logger.warning("InputRouter: 无文本内容，默认 diagnostic_query")
@@ -208,12 +213,15 @@ class InputRouter:
                 f"search_query={parsed_input.search_query[:50] if parsed_input.search_query else 'None'}"
             )
 
-            # 如果是诊断查询，进行字段提取（仅当 entities 为空时）
+            # 诊断查询：从文本中提取结构化实体（DTC码/车型/工况等），
+            # 供后续检索过滤和 DatabaseEntry 填充使用。仅当 entities 为空时
+            # （平台已传入 entities 时不重复提取）。
             if parsed_input.intent == InputIntent.DIAGNOSTIC_QUERY:
                 if parsed_input.entities is None:
                     try:
                         extractor = FieldExtractor()
                         record = extractor.extract(text)
+                        # IncidentRecord 字段映射到 StandardEntities（命名不同）
                         parsed_input.entities = StandardEntities(
                             dtc_code=[record.dtc_code] if record.dtc_code else [],
                             project=record.vehicle_type or "",
@@ -233,9 +241,11 @@ class InputRouter:
     def _route_with_rules(
         self, parsed_input: ParsedInput, text: str
     ) -> ParsedInput:
-        """规则回退模式（LLM 不可用时使用）"""
-        text_lower = text.lower()
+        """规则回退模式（LLM 不可用时使用）
 
+        按关键词命中判断意图，命中指令词 → INSTRUCTION，命中补充词 → SUPPLEMENT，
+        否则默认 DIAGNOSTIC_QUERY。规则模式不识别 OUT_OF_SCOPE（仅 LLM 能判断）。
+        """
         # 检查指令关键词
         if any(kw in text for kw in _INSTRUCTION_KEYWORDS):
             parsed_input.intent = InputIntent.INSTRUCTION

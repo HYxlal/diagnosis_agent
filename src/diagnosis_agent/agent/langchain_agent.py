@@ -177,7 +177,15 @@ class LangChainDiagnosticAgent:
             )
 
     def diagnose(self, parsed_input: ParsedInput) -> DiagnosticOutput:
-        """执行完整诊断流程（内部方法）"""
+        """执行完整诊断流程（内部方法）
+
+        主流程编排：
+        1. 工况文件意图：先转换文件为结构化数据，再把意图改回 DIAGNOSTIC_QUERY
+        2. 诊断查询意图：预检索相似工况（供 Agent 循环使用）
+        3. 其他意图（指令/补充）：跳过预检索，直接进 Agent
+        4. 运行 LangChain Agent → 提取工具调用 / ReAct 步骤 / 推理结果
+        5. 组装双层输出：DiagnosticReport（人读）+ DatabaseEntry（机读）
+        """
         description = parsed_input.description or ""
 
         diagnosis_id = f"DIAG-{uuid.uuid4().hex[:8]}"
@@ -185,6 +193,7 @@ class LangChainDiagnosticAgent:
 
         logger.info(f"开始诊断 [{diagnosis_id}]: intent={parsed_input.intent.value}, {description[:100]}...")
 
+        # 工况文件：先转换，然后把意图改回 DIAGNOSTIC_QUERY 进入正常诊断路径
         if parsed_input.intent == InputIntent.WORKING_CONDITION_FILE:
             logger.info("检测到工况文件意图，先调用转换工具")
             convert_result = self._tools.convert_working_condition_file(parsed_input.source_file or "")
@@ -195,6 +204,7 @@ class LangChainDiagnosticAgent:
                 parsed_input.bulk_records = convert_result["records"]
             parsed_input.intent = InputIntent.DIAGNOSTIC_QUERY
 
+        # 仅 DIAGNOSTIC_QUERY 做预检索；指令/补充类输入不检索以免污染 prompt 上下文
         if parsed_input.intent == InputIntent.DIAGNOSTIC_QUERY:
             similar_cases = self._retrieve_similar_cases(parsed_input)
         else:
@@ -211,6 +221,7 @@ class LangChainDiagnosticAgent:
 
         findings = self._build_findings(reasoning_result, similar_cases)
 
+        # 将检索到的 dict 结果转为 SimilarCase 模型，供报告展示
         similar_case_models = [
             SimilarCase(
                 record_id=c.get("record_id", ""),
@@ -229,7 +240,7 @@ class LangChainDiagnosticAgent:
 
         tools_used = list(set(tc.tool_name for tc in tool_calls))
 
-        # 从新格式的推理结果中提取字段
+        # 从 LLM 推理结果中取根因/对策（取列表第一项作为主结论）
         root_causes = reasoning_result.get("fault_root_cause", [])
         root_cause_text = root_causes[0] if root_causes else ""
         solutions = reasoning_result.get("solution", [])
@@ -284,14 +295,13 @@ class LangChainDiagnosticAgent:
     ) -> DatabaseEntry:
         """构建可录入数据库的结构化条目
 
-        字段来源：
-        - entities（平台 NLP 传入的标准化实体）
-        - bulk_records（文件解析得到的批量记录）
-        - LLM 推理结果（根因、对策、置信度）
+        字段来源优先级：entities（平台 NLP 实体）> bulk_records（文件解析记录）。
+        根因、对策、置信度来自 LLM 推理结果（reasoning_result）。
         """
         entities = parsed_input.entities
         description = parsed_input.description or ""
 
+        # 字段回退顺序：entities → bulk_records
         dtc_code = ""
         if entities and entities.dtc_code:
             dtc_code = ", ".join(entities.dtc_code)
@@ -420,10 +430,16 @@ classification 必须从给定的故障分类选项中选择。
 confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定，0.5 以下为推测。"""
 
     def _extract_tool_calls(self, messages: list[BaseMessage]) -> list[ToolCallRecord]:
-        """从消息列表中提取工具调用记录，关联 ToolMessage 结果"""
+        """从消息列表中提取工具调用记录，关联 ToolMessage 结果
+
+        需要两遍循环：第一遍从 AIMessage.tool_calls 建立按 id 索引的记录，
+        第二遍从 ToolMessage.tool_call_id 回填结果（工具返回的消息与发起调用的
+        AIMessage 是分离的，靠 tool_call_id 关联）。
+        """
         tool_calls = []
         tool_call_map = {}
 
+        # 第一遍：建立工具调用记录索引（key=tool_call_id）
         for msg in messages:
             if hasattr(msg, 'tool_calls') and msg.tool_calls:
                 for tc in msg.tool_calls:
@@ -438,6 +454,7 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
                         tool_call_map[tc_id] = tc_record
                     tool_calls.append(tc_record)
 
+        # 第二遍：根据 tool_call_id 关联 ToolMessage 的返回结果
         for msg in messages:
             if isinstance(msg, ToolMessage) and hasattr(msg, 'tool_call_id'):
                 tc_id = msg.tool_call_id
@@ -535,11 +552,14 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
     def _extract_json_from_text(self, text: str) -> Optional[dict]:
         """从文本中提取 JSON 对象
 
-        1. 尝试直接用 JsonOutputParser 解析
-        2. 失败则回退到代码块匹配（非贪婪，优先匹配 ```json 代码块）
-        3. 仍失败则返回 None
+        分层策略（从严到宽）：
+        1. 直接 json.loads 整段文本（LLM 直接返回纯 JSON 时）
+        2. 匹配 ```json ... ``` 代码块（LLM 把 JSON 包在代码块里）
+        3. 非贪婪匹配第一个 { ... } 块（兜底，处理混杂文本）
+
+        三层都失败则返回 None，由调用方走默认结果。
         """
-        # 尝试直接解析
+        # 1. 直接解析整段文本
         try:
             parsed = json.loads(text)
             if isinstance(parsed, dict):
@@ -547,7 +567,7 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
         except json.JSONDecodeError:
             pass
 
-        # 匹配 ```json ... ``` 代码块
+        # 2. 匹配 ```json ... ``` 代码块（非贪婪）
         fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
         if fenced:
             try:
@@ -557,7 +577,7 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
             except json.JSONDecodeError:
                 pass
 
-        # 匹配文本中第一个 { ... } 块（非贪婪）
+        # 3. 兜底：匹配文本中第一个 { ... } 块（非贪婪）
         brace_match = re.search(r"\{[\s\S]*?\}", text)
         if brace_match:
             try:

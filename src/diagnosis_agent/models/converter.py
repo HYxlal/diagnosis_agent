@@ -37,11 +37,13 @@ def standard_input_to_parsed(
 
     不再构建 IncidentRecord 中间对象，直接将 StandardEntities 赋值给 ParsedInput.entities。
     """
-    # 构建检索用 query：mcuid + raw_query
+    # 构建检索用 query：mcuid + raw_query（mcuid 作为前缀便于检索时定位）
     mcuid_prefix = f"[{standard_input.mcuid}] " if standard_input.mcuid else ""
     search_query = f"{mcuid_prefix}{standard_input.raw_query}"
 
-    # 确定初始意图（方案B：仍走InputRouter二次确认）
+    # 初始意图：平台传入的 intent_name 全部先映射为 DIAGNOSTIC_QUERY，
+    # 后续由 InputRouter 做二次分类（识别 instruction/supplement/out_of_scope）。
+    # intent_map 当前所有 MCU_* 都映射到同一个值，保留映射结构便于后续差异化处理。
     initial_intent = InputIntent.DIAGNOSTIC_QUERY
     if standard_input.intent_name:
         intent_map = {
@@ -79,14 +81,14 @@ def diagnostic_output_to_standard(
 ) -> StandardOutput:
     """将内部诊断结果转换为标准输出
 
-    优先使用 LLM 推理结果中的新字段（fault_root_cause, classification 等），
-    回退使用内部报告中的数据。
+    字段来源优先级：LLM 推理结果（reasoning_result）> 内部报告字段（report/database_entry）。
+    LLM 输出为空时，回退到 DiagnosticReport 的 findings / recommended_countermeasure。
     """
     report = diagnostic_output.report
     database_entry = diagnostic_output.database_entry
     reasoning = diagnostic_output.reasoning_result
 
-    # 构建输入回显
+    # input_ref 回显输入的关键字段，供平台 Agent 核对
     input_ref = {
         "raw_query": standard_input.raw_query,
         "intent_id": standard_input.intent_name or standard_input.mcuid,
@@ -96,7 +98,7 @@ def diagnostic_output_to_standard(
         },
     }
 
-    # 从推理结果中提取字段（优先使用 LLM 生成的新字段）
+    # 根因：优先用 LLM 输出的 fault_root_cause，空则回退到 findings 首条
     fault_root_cause = reasoning.get("fault_root_cause", [])
     if not fault_root_cause and report.findings:
         fault_root_cause = [report.findings[0].description]
@@ -105,6 +107,7 @@ def diagnostic_output_to_standard(
 
     classification = reasoning.get("classification", "")
 
+    # 解决方案：LLM solution 空 → database_entry.countermeasure → report.recommended_countermeasure
     solution = reasoning.get("solution", [])
     if not solution:
         if database_entry.countermeasure:
@@ -115,7 +118,7 @@ def diagnostic_output_to_standard(
     risk_warning = reasoning.get("risk_warning", "")
     maintenance_suggestions = reasoning.get("maintenance_suggestions", "")
 
-    # 构建相似工况描述字符串
+    # 相似工况：拼成人类可读的字符串（取前 3 条）
     similar_cases_str = ""
     if report.similar_cases:
         case_descriptions = []
@@ -126,7 +129,7 @@ def diagnostic_output_to_standard(
             case_descriptions.append(desc)
         similar_cases_str = "、".join(case_descriptions)
 
-    # 构建参考材料
+    # 参考材料：所有相似工况的摘要列表
     reference_material = []
     for sc in report.similar_cases:
         if sc.problem_description:

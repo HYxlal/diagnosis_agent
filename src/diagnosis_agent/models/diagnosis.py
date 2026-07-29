@@ -98,7 +98,9 @@ class DiagnosticReport(BaseModel):
 class DatabaseEntry(BaseModel):
     """可录入数据库的结构化条目 — 第二层输出
 
-    基于新 8 列表头，填充诊断结果。
+    基于标准 8 列表头，填充诊断结果。
+    8 列业务字段：problem_description / root_cause / countermeasure /
+    drive_code / vehicle_type / dashboard_indicator / dtc_code / fault_scenario。
     """
     diagnosis_id: str = Field(..., description="诊断会话ID")
     diagnosis_time: datetime = Field(default_factory=datetime.now, description="诊断时间")
@@ -119,7 +121,11 @@ class DatabaseEntry(BaseModel):
     similar_record_ids: list[str] = Field(default_factory=list, description="相似记录ID列表")
 
     def to_dict(self) -> dict:
-        """转换为字典（用于数据库写入，8 列业务字段使用中文表头）"""
+        """转换为字典（用于数据库写入）
+
+        8 列业务字段使用中文表头，与数据库列名对齐；
+        元数据字段（diagnosis_id/confidence 等）保持英文。
+        """
         return {
             "diagnosis_id": self.diagnosis_id,
             "diagnosis_time": self.diagnosis_time.isoformat(),
@@ -138,7 +144,13 @@ class DatabaseEntry(BaseModel):
 
 
 class DiagnosticOutput(BaseModel):
-    """双层输出的聚合模型"""
+    """双层输出的聚合模型
+
+    - report：人类可读的诊断报告（含 ReAct 步骤、工具调用、相似工况等）
+    - database_entry：机器可录入的结构化条目（标准 8 列 + 元数据）
+    - reasoning_result：LLM 原始推理结果（dict，含 fault_root_cause /
+      classification / solution 等新结构字段，供 converter 转标准输出时使用）
+    """
     report: DiagnosticReport = Field(..., description="第一层：诊断报告")
     database_entry: DatabaseEntry = Field(..., description="第二层：可录入条目")
     reasoning_result: dict = Field(

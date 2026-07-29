@@ -143,7 +143,13 @@ def _parse_traditional_input(
     file: Optional[List[str]],
     files: Optional[str],
 ) -> ParsedInput:
-    """解析传统模式（文本/文件）输入"""
+    """解析传统模式（文本/文件）输入
+
+    三种分支：
+    - 仅文本：直接 parse_input(text=...)
+    - 单文件：parse_input(text, file_path=...)
+    - 多文件：逐个解析后合并 bulk_records，text 只附加到第一个文件
+    """
     all_files = _collect_files(file, files)
 
     if not all_files:
@@ -160,6 +166,7 @@ def _parse_traditional_input(
             console.print(f"[red]输入解析失败: {e}[/red]")
             raise typer.Exit(1)
 
+    # 多文件合并：text 只附加到首个文件，其余纯文件解析
     console.print(f"[yellow]检测到多个文件，将合并处理: {len(all_files)} 个[/yellow]")
     parsed: Optional[ParsedInput] = None
     for idx, f in enumerate(all_files):
@@ -213,7 +220,11 @@ def _run_standard_diagnosis(
     output_dir: str,
     generate_md: bool,
 ) -> dict:
-    """执行标准接口诊断并输出/保存结果"""
+    """执行标准接口诊断并输出/保存结果
+
+    流程：构造 Agent → diagnose_with_standard_input → 控制台输出 + 保存 JSON。
+    错误状态（code != 0）只输出 code + msg，不输出 diagnosis_result。
+    """
     settings = get_settings()
 
     try:
@@ -271,7 +282,11 @@ def _run_traditional_diagnosis(
     generate_md: bool,
     std_output: bool,
 ) -> None:
-    """执行传统模式诊断并输出/保存结果"""
+    """执行传统模式诊断并输出/保存结果
+
+    流程：意图路由 → 诊断 → 按开关生成报告（MD / 标准JSON / 数据库条目）。
+    --std-output 时构造临时 StandardInput 把内部输出转成对外格式。
+    """
     settings = get_settings()
     router = InputRouter(settings)
     parsed = router.route(parsed)
@@ -296,6 +311,7 @@ def _run_traditional_diagnosis(
         md_path = generate_markdown_report(output, output_dir=output_dir)
         console.print(f"  📄 Markdown 报告: {md_path}")
 
+    # 传统模式没有 StandardInput，需要构造临时的用于转换成标准输出格式
     if std_output:
         temp_standard_input = StandardInput(
             raw_query=parsed.description,
@@ -306,6 +322,7 @@ def _run_traditional_diagnosis(
         console.print(Panel.fit("📋 标准JSON输出", style="bold blue"))
         console.print(json.dumps(standard_output.model_dump(), ensure_ascii=False, indent=2))
 
+    # 数据库条目始终生成（CSV + JSON）
     db_paths = generate_db_entries(output, output_dir=output_dir)
 
     console.print(Panel.fit("✅ 诊断完成", style="bold green"))

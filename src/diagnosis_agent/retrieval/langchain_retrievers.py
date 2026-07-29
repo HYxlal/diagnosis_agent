@@ -1,6 +1,7 @@
 """基于 LangChain BaseRetriever 的检索器实现
 
 统一检索器接口，支持与 LangChain 生态无缝集成。
+当前提供 Chroma 向量检索；Neo4jGraphRetriever 为预留接口。
 """
 
 from __future__ import annotations
@@ -106,52 +107,6 @@ class ChromaVectorRetriever(BaseRetriever):
             return []
 
 
-class BM25KeywordRetriever(BaseRetriever):
-    """基于 BM25 的关键词检索器
-
-    补充语义检索，提高精确匹配能力。
-    """
-
-    documents: list[Document]
-    top_k: int = 5
-
-    def _get_relevant_documents(self, query: str) -> list[Document]:
-        """关键词检索（同步）"""
-        try:
-            from rank_bm25 import BM25Okapi
-            import jieba
-
-            if not self.documents:
-                return []
-
-            # 使用 jieba 分词
-            tokenized_corpus = [
-                list(jieba.cut(doc.page_content)) for doc in self.documents
-            ]
-            tokenized_query = list(jieba.cut(query))
-
-            bm25 = BM25Okapi(tokenized_corpus)
-            scores = bm25.get_scores(tokenized_query)
-
-            # 获取 top_k 结果
-            results = []
-            for idx in scores.argsort()[::-1][:self.top_k]:
-                if scores[idx] > 0:
-                    doc = self.documents[idx]
-                    doc.metadata["score"] = float(scores[idx])
-                    results.append(doc)
-
-            logger.info(
-                f"BM25 检索: query='{query[:50]}...', "
-                f"返回 {len(results)} 条"
-            )
-
-            return results
-        except Exception as e:
-            logger.error(f"BM25 检索失败: {e}")
-            return []
-
-
 class Neo4jGraphRetriever(BaseRetriever):
     """基于 Neo4j 知识图谱的检索器
 
@@ -211,11 +166,6 @@ def create_chroma_retriever() -> ChromaVectorRetriever:
         top_k=settings.retrieval.semantic.top_k,
         score_threshold=settings.retrieval.semantic.score_threshold,
     )
-
-
-def create_bm25_retriever(documents: list[Document]) -> BM25KeywordRetriever:
-    """创建 BM25 关键词检索器"""
-    return BM25KeywordRetriever(documents=documents)
 
 
 def create_neo4j_retriever() -> Neo4jGraphRetriever:

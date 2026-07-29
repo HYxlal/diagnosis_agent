@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Optional
@@ -64,12 +65,7 @@ logger = logging.getLogger(__name__)
 class LangChainDiagnosticAgent:
     """基于 LangChain 最新架构的诊断 Agent
 
-    使用多源检索：
-    - ChromaVectorRetriever: 向量语义检索
-    - BM25KeywordRetriever: 关键词检索（可选）
-    - Neo4jGraphRetriever: 知识图谱检索（可选）
-
-    使用 langchain.agents.create_agent 构建 Agent。
+    使用 ChromaVectorRetriever 做向量语义检索，LangChain create_agent 构建 Agent。
     """
 
     def __init__(self, settings: Settings):
@@ -254,12 +250,47 @@ class LangChainDiagnosticAgent:
             tools_used=tools_used,
         )
 
-        confidence = reasoning_result.get("confidence", 0.3)
 
-        # 从 entities / bulk_records 中获取字段（field_extraction 已废弃）
+        database_entry = self._build_database_entry(
+            parsed_input=parsed_input,
+            diagnosis_id=diagnosis_id,
+            diagnosis_time=diagnosis_time,
+            root_cause_text=root_cause_text,
+            countermeasure_text=countermeasure_text,
+            confidence=reasoning_result.get("confidence", 0.3),
+            based_on_similar=has_similar,
+            similar_record_ids=[c.get("record_id", "") for c in similar_cases],
+        )
+
+        diagnostic_output = DiagnosticOutput(
+            report=report,
+            database_entry=database_entry,
+            reasoning_result=reasoning_result,
+        )
+        self._last_diagnostic_output = diagnostic_output
+        return diagnostic_output
+
+    def _build_database_entry(
+        self,
+        parsed_input: ParsedInput,
+        diagnosis_id: str,
+        diagnosis_time: datetime,
+        root_cause_text: str,
+        countermeasure_text: str,
+        confidence: float,
+        based_on_similar: bool,
+        similar_record_ids: list[str],
+        max_summary_length: int = 500,
+    ) -> DatabaseEntry:
+        """构建可录入数据库的结构化条目
+
+        字段来源：
+        - entities（平台 NLP 传入的标准化实体）
+        - bulk_records（文件解析得到的批量记录）
+        - LLM 推理结果（根因、对策、置信度）
+        """
         entities = parsed_input.entities
-
-        problem_desc = description[:500]
+        description = parsed_input.description or ""
 
         dtc_code = ""
         if entities and entities.dtc_code:
@@ -273,43 +304,27 @@ class LangChainDiagnosticAgent:
         else:
             vehicle_type = self._extract_from_records(parsed_input, "vehicle_type")
 
-        component = ""
-        if entities and entities.component:
-            component = entities.component
-
         fault_scenario = ""
         if entities and entities.working_condition:
             fault_scenario = entities.working_condition
         else:
             fault_scenario = self._extract_from_records(parsed_input, "fault_scenario")
 
-        drive_code = self._extract_from_records(parsed_input, "drive_code")
-
-        dashboard_indicator = self._extract_from_records(parsed_input, "dashboard_indicator")
-
-        database_entry = DatabaseEntry(
+        return DatabaseEntry(
             diagnosis_id=diagnosis_id,
             diagnosis_time=diagnosis_time,
-            problem_description=problem_desc,
+            problem_description=description[:max_summary_length],
             root_cause=root_cause_text,
             countermeasure=countermeasure_text,
-            drive_code=drive_code,
+            drive_code=self._extract_from_records(parsed_input, "drive_code"),
             vehicle_type=vehicle_type,
-            dashboard_indicator=dashboard_indicator,
+            dashboard_indicator=self._extract_from_records(parsed_input, "dashboard_indicator"),
             dtc_code=dtc_code,
             fault_scenario=fault_scenario,
             diagnostic_confidence=confidence,
-            based_on_similar=has_similar,
-            similar_record_ids=[c.get("record_id", "") for c in similar_cases],
+            based_on_similar=based_on_similar,
+            similar_record_ids=similar_record_ids,
         )
-
-        diagnostic_output = DiagnosticOutput(
-            report=report,
-            database_entry=database_entry,
-            reasoning_result=reasoning_result,
-        )
-        self._last_diagnostic_output = diagnostic_output
-        return diagnostic_output
 
     def _run_agent(
         self,
@@ -500,17 +515,14 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
         if not last_message:
             return self._get_default_result()
 
-        content = getattr(last_message, 'content', '')
+        content = getattr(last_message, "content", "")
 
         try:
             if isinstance(content, dict):
                 data = content
             else:
-                import re
-                json_match = re.search(r'\{[\s\S]*\}', str(content))
-                if json_match:
-                    data = json.loads(json_match.group())
-                else:
+                data = self._extract_json_from_text(str(content))
+                if data is None:
                     return self._get_default_result()
 
             result = DiagnosticResult(**data)
@@ -519,6 +531,43 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
         except (json.JSONDecodeError, TypeError, ValueError) as e:
             logger.error(f"解析最终结果失败: {e}")
             return self._get_default_result()
+
+    def _extract_json_from_text(self, text: str) -> Optional[dict]:
+        """从文本中提取 JSON 对象
+
+        1. 尝试直接用 JsonOutputParser 解析
+        2. 失败则回退到代码块匹配（非贪婪，优先匹配 ```json 代码块）
+        3. 仍失败则返回 None
+        """
+        # 尝试直接解析
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        # 匹配 ```json ... ``` 代码块
+        fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+        if fenced:
+            try:
+                parsed = json.loads(fenced.group(1))
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+
+        # 匹配文本中第一个 { ... } 块（非贪婪）
+        brace_match = re.search(r"\{[\s\S]*?\}", text)
+        if brace_match:
+            try:
+                parsed = json.loads(brace_match.group())
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+
+        return None
 
     def _get_default_result(self) -> dict:
         """返回默认结果"""

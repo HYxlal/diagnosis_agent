@@ -28,7 +28,8 @@ from .agent.input_router import InputRouter
 from .agent.langchain_agent import LangChainDiagnosticAgent
 from .config import Settings, get_settings, reset_settings
 from .models.converter import diagnostic_output_to_standard
-from .models.input import InputIntent, InputType, StandardEntities, StandardInput
+from .models.input import InputIntent, InputType, ParsedInput, StandardEntities, StandardInput
+from .models.incident import IncidentRecord
 from .parsers.unified import parse_input
 from .reporting.entries import generate_both as generate_db_entries
 from .reporting.markdown import generate_markdown_report
@@ -46,6 +47,10 @@ app = typer.Typer(
 console = Console()
 
 
+# ---------------------------------------------------------------------------
+# 日志与通用工具
+# ---------------------------------------------------------------------------
+
 def _setup_logging(verbose: bool = False):
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
@@ -61,14 +66,7 @@ def _setup_logging(verbose: bool = False):
 # ---------------------------------------------------------------------------
 
 def _print_model_status(settings: Settings) -> None:
-    """CLI 启动时统一展示所有模型的配置状态
-
-    展示内容：
-    - 主 LLM 模型（名称 / API key 状态 / 可用性）
-    - Embedding 模型（名称 / API key 状态）
-    - InputRouter 模型（名称 / 启用状态）
-    - 向量存储类型
-    """
+    """CLI 启动时统一展示所有模型的配置状态"""
     table = Table(
         title="⚙️  模型配置状态",
         show_header=True,
@@ -80,54 +78,24 @@ def _print_model_status(settings: Settings) -> None:
     table.add_column("状态", justify="center", width=10)
     table.add_column("备注", width=30)
 
-    # --- 主 LLM ---
     llm_key_set = bool(settings.llm.api_key)
     llm_status = "[green]✅ 已配置[/green]" if llm_key_set else "[red]❌ 未配置[/red]"
     llm_note = "诊断推理核心模型" if llm_key_set else "请设置 DASHSCOPE_API_KEY"
-    table.add_row(
-        "LLM (推理)",
-        settings.llm.model,
-        llm_status,
-        llm_note,
-    )
+    table.add_row("LLM (推理)", settings.llm.model, llm_status, llm_note)
 
-    # --- Embedding ---
     emb_key_set = bool(settings.embedding.api_key)
     emb_status = "[green]✅ 已配置[/green]" if emb_key_set else "[red]❌ 未配置[/red]"
     emb_note = "向量编码模型" if emb_key_set else "回退到 ChromaDB 默认 embedding"
-    table.add_row(
-        "Embedding",
-        settings.embedding.model,
-        emb_status,
-        emb_note,
-    )
+    table.add_row("Embedding", settings.embedding.model, emb_status, emb_note)
 
-    # --- InputRouter ---
     if settings.input_router.enabled:
-        # InputRouter 复用主 LLM 的 API key
         router_status = "[green]✅ 已启用[/green]" if llm_key_set else "[yellow]⚠️ 回退模式[/yellow]"
         router_note = "轻量意图分类" if llm_key_set else "LLM 不可用，使用规则匹配"
-        table.add_row(
-            "InputRouter",
-            settings.input_router.model,
-            router_status,
-            router_note,
-        )
+        table.add_row("InputRouter", settings.input_router.model, router_status, router_note)
     else:
-        table.add_row(
-            "InputRouter",
-            settings.input_router.model,
-            "[dim]⏸️ 已禁用[/dim]",
-            "所有输入走默认诊断流程",
-        )
+        table.add_row("InputRouter", settings.input_router.model, "[dim]⏸️ 已禁用[/dim]", "所有输入走默认诊断流程")
 
-    # --- 向量存储 ---
-    table.add_row(
-        "向量存储",
-        settings.vector_store.type,
-        "[blue]📦 本地[/blue]",
-        f"集合: {settings.vector_store.collection_name}",
-    )
+    table.add_row("向量存储", settings.vector_store.type, "[blue]📦 本地[/blue]", f"集合: {settings.vector_store.collection_name}")
 
     console.print(table)
     console.print()
@@ -144,6 +112,217 @@ def _build_components(settings: Settings):
     )
     return store, settings
 
+
+# ---------------------------------------------------------------------------
+# 输入收集
+# ---------------------------------------------------------------------------
+
+def _collect_files(
+    file: Optional[List[str]],
+    files: Optional[str],
+) -> List[Path]:
+    """收集所有输入文件（支持单文件、多文件、目录）"""
+    all_files: List[Path] = []
+
+    if file:
+        all_files.extend(Path(f) for f in file)
+
+    if files:
+        dir_path = Path(files)
+        if not dir_path.exists():
+            console.print(f"[red]目录不存在: {files}[/red]")
+            raise typer.Exit(1)
+        for ext in SUPPORTED_EXTENSIONS:
+            all_files.extend(dir_path.glob(f"*{ext}"))
+
+    return all_files
+
+
+def _parse_traditional_input(
+    text: Optional[str],
+    file: Optional[List[str]],
+    files: Optional[str],
+) -> ParsedInput:
+    """解析传统模式（文本/文件）输入"""
+    all_files = _collect_files(file, files)
+
+    if not all_files:
+        try:
+            return parse_input(text=text)
+        except Exception as e:
+            console.print(f"[red]输入解析失败: {e}[/red]")
+            raise typer.Exit(1)
+
+    if len(all_files) == 1:
+        try:
+            return parse_input(text=text, file_path=str(all_files[0]))
+        except Exception as e:
+            console.print(f"[red]输入解析失败: {e}[/red]")
+            raise typer.Exit(1)
+
+    console.print(f"[yellow]检测到多个文件，将合并处理: {len(all_files)} 个[/yellow]")
+    parsed: Optional[ParsedInput] = None
+    for idx, f in enumerate(all_files):
+        try:
+            current = parse_input(text=text if idx == 0 else None, file_path=str(f))
+            if parsed is None:
+                parsed = current
+            else:
+                parsed.bulk_records.extend(current.bulk_records)
+                if current.description and current.description not in parsed.description:
+                    parsed.description += f"\n---\n{current.description}"
+        except Exception as e:
+            console.print(f"[yellow]跳过文件 {f}: {e}[/yellow]")
+
+    if parsed is None:
+        console.print("[red]所有文件解析失败[/red]")
+        raise typer.Exit(1)
+
+    parsed.input_type = InputType.MIXED
+    return parsed
+
+
+# ---------------------------------------------------------------------------
+# 标准接口模式
+# ---------------------------------------------------------------------------
+
+def _load_standard_input(json_input: str) -> StandardInput:
+    """加载并解析标准接口 JSON 输入"""
+    try:
+        with open(json_input, "r", encoding="utf-8") as f:
+            raw_data = json.load(f)
+    except FileNotFoundError:
+        error_output = {"code": -1, "msg": f"JSON文件不存在: {json_input}"}
+        console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
+        raise typer.Exit(1)
+    except json.JSONDecodeError as e:
+        error_output = {"code": -1, "msg": f"JSON解析失败: {e}"}
+        console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
+        raise typer.Exit(1)
+
+    try:
+        return StandardInput(**raw_data)
+    except Exception as e:
+        error_output = {"code": -1, "msg": f"入参缺失关键信息无法诊断: {e}"}
+        console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
+        raise typer.Exit(1)
+
+
+def _run_standard_diagnosis(
+    standard_input: StandardInput,
+    output_dir: str,
+    generate_md: bool,
+) -> dict:
+    """执行标准接口诊断并输出/保存结果"""
+    settings = get_settings()
+
+    try:
+        agent = LangChainDiagnosticAgent(settings=settings)
+        standard_output = agent.diagnose_with_standard_input(standard_input)
+    except Exception as e:
+        error_output = {"code": -2, "msg": f"Agent输出异常: {e}"}
+        console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
+        raise typer.Exit(1)
+
+    if standard_output.code == 0:
+        console.print(Panel.fit("✅ 诊断完成", style="bold green"))
+        console.print(f"  状态码: [cyan]{standard_output.code}[/cyan]")
+        console.print(f"  状态: {standard_output.msg}")
+
+        if standard_output.diagnosis_result:
+            result = standard_output.diagnosis_result
+            console.print(f"  诊断置信度: {standard_output.diagnosis_confidence:.0%}")
+            console.print(f"  根因数量: {len(result.fault_root_cause)}")
+            console.print(f"  解决方案数量: {len(result.solution)}")
+
+        console.print()
+        console.print("  📄 标准输出JSON:")
+        console.print(json.dumps(standard_output.model_dump(), ensure_ascii=False, indent=2))
+
+        if generate_md:
+            internal_output = agent._last_diagnostic_output
+            if internal_output:
+                md_path = generate_markdown_report(internal_output, output_dir=output_dir)
+                console.print(f"  📄 Markdown 报告: {md_path}")
+            else:
+                console.print("[yellow]  ⚠️ 无法生成Markdown报告: 内部诊断输出不可用[/yellow]")
+
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        json_output_path = output_path / f"diagnosis_output_{standard_input.mcuid}.json"
+        with open(json_output_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(standard_output.model_dump(), ensure_ascii=False, indent=2))
+        console.print(f"\n  💾 已保存到: {json_output_path}")
+    else:
+        console.print(Panel.fit("⚠️ 诊断失败", style="bold red"))
+        error_output = {"code": standard_output.code, "msg": standard_output.msg}
+        console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
+
+    return standard_output.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# 传统模式
+# ---------------------------------------------------------------------------
+
+def _run_traditional_diagnosis(
+    parsed: ParsedInput,
+    output_dir: str,
+    generate_md: bool,
+    std_output: bool,
+) -> None:
+    """执行传统模式诊断并输出/保存结果"""
+    settings = get_settings()
+    router = InputRouter(settings)
+    parsed = router.route(parsed)
+
+    console.print(f"  输入类型: {parsed.input_type.value}")
+    console.print(f"  意图: [cyan]{parsed.intent.value}[/cyan]")
+    console.print(f"  描述: {parsed.description[:100]}...")
+    if parsed.is_bulk():
+        console.print(f"  批量记录: {len(parsed.bulk_records)} 条")
+    if parsed.search_query:
+        console.print(f"  检索 query: {parsed.search_query[:80]}...")
+    console.print()
+
+    try:
+        agent = LangChainDiagnosticAgent(settings=settings)
+        output = agent.diagnose(parsed)
+    except Exception as e:
+        console.print(f"[red]诊断失败: {e}[/red]")
+        raise typer.Exit(1)
+
+    if generate_md:
+        md_path = generate_markdown_report(output, output_dir=output_dir)
+        console.print(f"  📄 Markdown 报告: {md_path}")
+
+    if std_output:
+        temp_standard_input = StandardInput(
+            raw_query=parsed.description,
+            mcuid="CLI",
+            entities=StandardEntities(),
+        )
+        standard_output = diagnostic_output_to_standard(output, temp_standard_input)
+        console.print(Panel.fit("📋 标准JSON输出", style="bold blue"))
+        console.print(json.dumps(standard_output.model_dump(), ensure_ascii=False, indent=2))
+
+    db_paths = generate_db_entries(output, output_dir=output_dir)
+
+    console.print(Panel.fit("✅ 诊断完成", style="bold green"))
+    console.print(f"  诊断ID: {output.report.diagnosis_id}")
+    console.print(f"  找到相似工况: {output.report.has_similar_cases}")
+    console.print(f"  推荐对策: {output.report.recommended_countermeasure[:100]}...")
+    console.print(f"  置信度: {output.database_entry.diagnostic_confidence:.0%}")
+    console.print()
+    if generate_md:
+        console.print(f"  📄 Markdown 报告: [dim]已生成[/dim]")
+    console.print(f"  📊 CSV 条目: {db_paths['csv']}")
+    console.print(f"  📊 JSON 条目: {db_paths['json']}")
+
+
+# ---------------------------------------------------------------------------
+# CLI 命令
+# ---------------------------------------------------------------------------
 
 @app.command()
 def diagnose(
@@ -166,7 +345,6 @@ def diagnose(
     - 标准JSON（默认）：使用 --std-output 输出到控制台
     - Markdown报告（--generate-md）：调试用，生成详细报告
     """
-
     _setup_logging(verbose)
     reset_settings()
     settings = get_settings()
@@ -174,183 +352,23 @@ def diagnose(
     console.print(Panel.fit("🔍 故障诊断 Agent", style="bold blue"))
     _print_model_status(settings)
 
-    # 标准接口模式：JSON输入
     if json_input:
         console.print(f"[dim]使用标准接口模式，加载JSON输入: {json_input}[/dim]")
-
-        # 加载并解析 JSON
-        try:
-            with open(json_input, 'r', encoding='utf-8') as f:
-                raw_data = json.load(f)
-        except FileNotFoundError:
-            error_output = {"code": -1, "msg": f"JSON文件不存在: {json_input}"}
-            console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
-            return error_output
-        except json.JSONDecodeError as e:
-            error_output = {"code": -1, "msg": f"JSON解析失败: {e}"}
-            console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
-            return error_output
-
-        # 创建 StandardInput 并验证
-        try:
-            standard_input = StandardInput(**raw_data)
-        except Exception as e:
-            error_output = {"code": -1, "msg": f"入参缺失关键信息无法诊断: {e}"}
-            console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
-            return error_output
-
-        # 执行标准接口诊断
-        try:
-            agent = LangChainDiagnosticAgent(settings=settings)
-            standard_output = agent.diagnose_with_standard_input(standard_input)
-        except Exception as e:
-            error_output = {"code": -2, "msg": f"Agent输出异常: {e}"}
-            console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
-            return error_output
-
-        # 输出结果
-        if standard_output.code == 0:
-            console.print(Panel.fit("✅ 诊断完成", style="bold green"))
-            console.print(f"  状态码: [cyan]{standard_output.code}[/cyan]")
-            console.print(f"  状态: {standard_output.msg}")
-
-            if standard_output.diagnosis_result:
-                result = standard_output.diagnosis_result
-                console.print(f"  诊断置信度: {standard_output.diagnosis_confidence:.0%}")
-                console.print(f"  根因数量: {len(result.fault_root_cause)}")
-                console.print(f"  解决方案数量: {len(result.solution)}")
-
-            console.print()
-            console.print(f"  📄 标准输出JSON:")
-            console.print(json.dumps(standard_output.model_dump(), ensure_ascii=False, indent=2))
-        else:
-            # 错误状态只输出 code 和 msg
-            console.print(Panel.fit("⚠️ 诊断失败", style="bold red"))
-            error_output = {"code": standard_output.code, "msg": standard_output.msg}
-            console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
-            return error_output
-
-        # 生成 Markdown 报告（-g / --generate-md 开关）
-        if generate_md:
-            internal_output = agent._last_diagnostic_output
-            if internal_output:
-                md_path = generate_markdown_report(internal_output, output_dir=output_dir)
-                console.print(f"  📄 Markdown 报告: {md_path}")
-            else:
-                console.print("[yellow]  ⚠️ 无法生成Markdown报告: 内部诊断输出不可用[/yellow]")
-
-        # 保存到文件
-        output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
-        json_output_path = output_path / f"diagnosis_output_{standard_input.mcuid}.json"
-        with open(json_output_path, 'w', encoding='utf-8') as f:
-            f.write(json.dumps(standard_output.model_dump(), ensure_ascii=False, indent=2))
-        console.print(f"\n  💾 已保存到: {json_output_path}")
-
+        standard_input = _load_standard_input(json_input)
+        _run_standard_diagnosis(standard_input, output_dir=output_dir, generate_md=generate_md)
         return
 
-    # 传统模式：文本/文件输入
     if not text and not file and not files:
         console.print("[red]请指定输入：--text/-f/--files 或 --json-input[/red]")
         raise typer.Exit(1)
 
-    # 收集所有文件
-    all_files = []
-    if file:
-        all_files.extend(file)
-    if files:
-        dir_path = Path(files)
-        if not dir_path.exists():
-            console.print(f"[red]目录不存在: {files}[/red]")
-            raise typer.Exit(1)
-        for ext in SUPPORTED_EXTENSIONS:
-            all_files.extend(dir_path.glob(f"*{ext}"))
-
-    # 解析输入
-    if all_files:
-        if len(all_files) == 1:
-            file_path = str(all_files[0])
-            try:
-                parsed = parse_input(text=text, file_path=file_path)
-            except Exception as e:
-                console.print(f"[red]输入解析失败: {e}[/red]")
-                raise typer.Exit(1)
-        else:
-            console.print(f"[yellow]检测到多个文件，将合并处理: {len(all_files)} 个[/yellow]")
-            parsed = None
-            for idx, f in enumerate(all_files):
-                try:
-                    current = parse_input(text=text if idx == 0 else None, file_path=str(f))
-                    if parsed is None:
-                        parsed = current
-                    else:
-                        parsed.bulk_records.extend(current.bulk_records)
-                        if current.description and current.description not in parsed.description:
-                            parsed.description += f"\n---\n{current.description}"
-                except Exception as e:
-                    console.print(f"[yellow]跳过文件 {f}: {e}[/yellow]")
-            if parsed is None:
-                console.print("[red]所有文件解析失败[/red]")
-                raise typer.Exit(1)
-            parsed.input_type = InputType.MIXED
-    else:
-        try:
-            parsed = parse_input(text=text)
-        except Exception as e:
-            console.print(f"[red]输入解析失败: {e}[/red]")
-            raise typer.Exit(1)
-
-    # 意图路由
-    router = InputRouter(settings)
-    parsed = router.route(parsed)
-
-    console.print(f"  输入类型: {parsed.input_type.value}")
-    console.print(f"  意图: [cyan]{parsed.intent.value}[/cyan]")
-    console.print(f"  描述: {parsed.description[:100]}...")
-    if parsed.is_bulk():
-        console.print(f"  批量记录: {len(parsed.bulk_records)} 条")
-    if parsed.search_query:
-        console.print(f"  检索 query: {parsed.search_query[:80]}...")
-    console.print()
-
-    # 执行诊断
-    try:
-        agent = LangChainDiagnosticAgent(settings=settings)
-        output = agent.diagnose(parsed)
-    except Exception as e:
-        console.print(f"[red]诊断失败: {e}[/red]")
-        raise typer.Exit(1)
-
-    # 生成报告（根据开关）
-    if generate_md:
-        md_path = generate_markdown_report(output, output_dir=output_dir)
-        console.print(f"  📄 Markdown 报告: {md_path}")
-
-    if std_output:
-        # 构造一个临时的StandardInput用于转换
-        temp_standard_input = StandardInput(
-            raw_query=parsed.description,
-            mcuid="CLI",
-            entities=StandardEntities(),
-        )
-        standard_output = diagnostic_output_to_standard(output, temp_standard_input)
-
-        console.print(Panel.fit("📋 标准JSON输出", style="bold blue"))
-        console.print(json.dumps(standard_output.model_dump(), ensure_ascii=False, indent=2))
-
-    # 生成数据库条目（始终生成）
-    db_paths = generate_db_entries(output, output_dir=output_dir)
-
-    console.print(Panel.fit("✅ 诊断完成", style="bold green"))
-    console.print(f"  诊断ID: {output.report.diagnosis_id}")
-    console.print(f"  找到相似工况: {output.report.has_similar_cases}")
-    console.print(f"  推荐对策: {output.report.recommended_countermeasure[:100]}...")
-    console.print(f"  置信度: {output.database_entry.diagnostic_confidence:.0%}")
-    console.print()
-    if generate_md:
-        console.print(f"  📄 Markdown 报告: [dim]已生成[/dim]")
-    console.print(f"  📊 CSV 条目: {db_paths['csv']}")
-    console.print(f"  📊 JSON 条目: {db_paths['json']}")
+    parsed = _parse_traditional_input(text=text, file=file, files=files)
+    _run_traditional_diagnosis(
+        parsed,
+        output_dir=output_dir,
+        generate_md=generate_md,
+        std_output=std_output,
+    )
 
 
 @app.command()
@@ -361,7 +379,6 @@ def search(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
 ):
     """检索相似工单"""
-
     _setup_logging(verbose)
     reset_settings()
     settings = get_settings()
@@ -409,7 +426,6 @@ def load_data(
     默认路径: data/samples/
     导入后文件会自动移动到 data/samples/processed/ 避免重复导入
     """
-
     _setup_logging(verbose)
     reset_settings()
     settings = get_settings()
@@ -417,13 +433,11 @@ def load_data(
     console.print(Panel.fit("📥 数据加载", style="bold blue"))
     _print_model_status(settings)
 
-    # 默认路径
     default_path = Path(settings.paths.samples_dir)
 
-    # 收集所有文件
-    all_files = []
+    all_files: List[Path] = []
     if file:
-        all_files.extend(file)
+        all_files.extend(Path(f) for f in file)
     if files:
         dir_path = Path(files)
         if not dir_path.exists():
@@ -438,7 +452,6 @@ def load_data(
         for ext in SUPPORTED_EXTENSIONS:
             all_files.extend(default_path.glob(f"*{ext}"))
 
-    # 如果没有指定文件，自动使用默认路径
     if not all_files:
         if default_path.exists():
             found_files = []
@@ -454,11 +467,9 @@ def load_data(
             console.print("[red]未指定文件且默认目录不存在[/red]")
             raise typer.Exit(1)
 
-    # 创建已处理目录
     processed_dir = default_path / PROCESSED_DIR_NAME
     processed_dir.mkdir(exist_ok=True)
 
-    # 统计变量
     total_files = len(all_files)
     success_count = 0
     skip_count = 0
@@ -468,15 +479,11 @@ def load_data(
     console.print(f"\n  找到 {total_files} 个文件待处理")
     console.print()
 
-    # 构建组件（只构建一次）
     store, _ = _build_components(settings)
-    from .models.incident import IncidentRecord
 
-    # 逐个处理文件
     for idx, file_path in enumerate(all_files, 1):
         file_path = Path(file_path)
 
-        # 检查是否已处理（在 processed 目录中）
         processed_path = processed_dir / file_path.name
         if processed_path.exists():
             console.print(f"  [{idx}/{total_files}] [dim]跳过[/dim] {file_path.name}（已处理）")
@@ -485,7 +492,6 @@ def load_data(
 
         console.print(f"  [{idx}/{total_files}] 处理 {file_path.name}...")
 
-        # 解析文件
         try:
             parsed = parse_input(file_path=str(file_path))
         except Exception as e:
@@ -498,23 +504,19 @@ def load_data(
             fail_count += 1
             continue
 
-        # 构建 IncidentRecord 列表
-        records = []
+        records: List[IncidentRecord] = []
         for rec_dict in parsed.bulk_records:
             try:
-                record = IncidentRecord.from_dict(rec_dict)
-                records.append(record)
+                records.append(IncidentRecord.from_dict(rec_dict))
             except Exception as e:
                 console.print(f"    [yellow]跳过记录: {e}[/yellow]")
 
-        # 加载到向量库
         count = store.add_records(records)
         if count > 0:
             total_records += count
             success_count += 1
             console.print(f"    [green]成功加载 {count} 条记录[/green]")
 
-            # 移动到已处理目录
             try:
                 shutil.move(str(file_path), str(processed_path))
                 console.print(f"    [dim]已移动到 {PROCESSED_DIR_NAME}/[/dim]")
@@ -524,7 +526,6 @@ def load_data(
             fail_count += 1
             console.print(f"    [yellow]未加载任何记录[/yellow]")
 
-    # 汇总
     console.print()
     console.print(Panel.fit("📊 导入完成", style="bold blue"))
     console.print(f"  总计: {total_files} 个文件")
@@ -538,7 +539,6 @@ def load_data(
 @app.command()
 def stats():
     """查看向量库统计"""
-
     reset_settings()
     settings = get_settings()
 
@@ -556,7 +556,6 @@ def clear(
     confirm: bool = typer.Option(False, "--confirm", "-y", help="确认清空"),
 ):
     """清空向量库"""
-
     if not confirm:
         console.print("[yellow]请使用 --confirm 确认清空操作[/yellow]")
         raise typer.Exit(1)
@@ -572,13 +571,11 @@ def clear(
 @app.command()
 def config():
     """查看当前模型配置状态"""
-
     reset_settings()
     settings = get_settings()
 
     _print_model_status(settings)
 
-    # 额外展示检索配置
     rt_table = Table(
         title="🔍 检索配置",
         show_header=True,

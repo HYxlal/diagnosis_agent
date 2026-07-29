@@ -1,0 +1,7 @@
+{
+    "raw_query": "MCU报P1A3E98爬坡IGBT过温",
+    "mcuid": "",
+    "entities": {
+        "dtc_code": ["P1A3E98"]
+    }
+}

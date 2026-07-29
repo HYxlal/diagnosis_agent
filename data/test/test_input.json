@@ -1,0 +1,13 @@
+{
+    "raw_query": "MCU报P1A3E98爬坡IGBT过温",
+    "mcuid": "MCU_001",
+    "intent_name": "MCU_001",
+    "entities": {
+        "dtc_code": ["P1A3E98"],
+        "project": "H37A",
+        "component": "IGBT/MCU",
+        "working_condition": "爬坡满载、高温",
+        "software_version": "H37A3621830AW"
+    },
+    "user_id": "test_user"
+}

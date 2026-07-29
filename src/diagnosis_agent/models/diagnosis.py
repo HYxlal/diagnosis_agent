@@ -141,3 +141,7 @@ class DiagnosticOutput(BaseModel):
     """双层输出的聚合模型"""
     report: DiagnosticReport = Field(..., description="第一层：诊断报告")
     database_entry: DatabaseEntry = Field(..., description="第二层：可录入条目")
+    reasoning_result: dict = Field(
+        default_factory=dict,
+        description="LLM 推理结果（包含新结构字段: fault_root_cause, classification, solution 等）",
+    )

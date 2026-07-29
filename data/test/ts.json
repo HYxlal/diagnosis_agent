@@ -1,0 +1,18 @@
+{
+    "raw_query": "行车加热进入堵转加热状态时，车辆偶发持续性的剧烈抖动",
+    "mcuid": "MCU_002",
+    "intent_name": "",
+    "query_confidence": null,
+    "entities": {
+        "dtc_code": [],
+        "project": "",
+        "component": "",
+        "working_condition": "",
+        "software_version": ""
+    },
+    "session_id": "",
+    "context_history": [
+        
+    ],
+    "user_id": "03"
+}

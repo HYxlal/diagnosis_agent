@@ -24,7 +24,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from ..config import Settings
-from ..models.input import InputIntent, InputType, ParsedInput
+from ..models.input import InputIntent, InputType, ParsedInput, StandardEntities
 from ..parsers.field_extractor import FieldExtractor
 
 logger = logging.getLogger(__name__)
@@ -37,16 +37,16 @@ logger = logging.getLogger(__name__)
 class IntentClassificationResult(BaseModel):
     """意图分类结果模型"""
     intent: str = Field(
-        description="意图类别：diagnostic_query | instruction | supplement | working_condition_file",
-        examples=["diagnostic_query", "instruction", "supplement", "working_condition_file"]
+        description="意图类别：diagnostic_query | instruction | supplement | working_condition_file | out_of_scope",
+        examples=["diagnostic_query", "instruction", "supplement", "working_condition_file", "out_of_scope"]
     )
     search_query: str = Field(
-        description="如果是 diagnostic_query，提取适合检索的核心故障描述（去除指令性语言）；否则为空字符串",
-        examples=["发动机故障灯亮 怠速不稳", "电池温升过快"]
+        description="如果是 diagnostic_query，提取适合检索的核心故障描述；否则为空字符串",
+        examples=["电机报P1A3E98过温", "MCU通讯丢失"]
     )
     reason: str = Field(
         description="简要说明分类理由",
-        examples=["用户描述了具体的故障现象，属于诊断查询"]
+        examples=["用户描述了电驱系统故障现象，属于诊断查询"]
     )
 
 
@@ -54,24 +54,28 @@ class IntentClassificationResult(BaseModel):
 # 意图分类 prompt
 # ---------------------------------------------------------------------------
 
-INTENT_CLASSIFICATION_PROMPT = """你是一个输入意图分类器。请判断用户输入属于以下哪一类：
+INTENT_CLASSIFICATION_PROMPT = """你是一个输入意图分类器，专注于电驱系统（MCU/电机/逆变器）故障诊断。请判断用户输入属于以下哪一类：
 
-1. **diagnostic_query**：故障描述/诊断查询。用户在描述车辆故障现象，希望得到诊断。
-   示例："发动机故障灯亮，怠速不稳"、"电池温升过快"、"行驶中熄火"
+1. **diagnostic_query**：电驱系统故障描述/诊断查询。用户在描述与电驱系统相关的故障现象。
+   示例："电机报P1A3E98过温"、"MCU通讯丢失"、"IGBT驱动异常"
 
 2. **instruction**：操作指令。用户在给你下达指令，告诉你要关注什么或调整诊断方向。
-   示例："请重点关注电池系统"、"换一种思路分析"、"只看最近半年的工单"
+   示例："请重点关注IGBT"、"换一种思路分析"、"只看最近半年的工单"
 
 3. **supplement**：信息补充。用户在补充之前诊断的背景信息。
-   示例："补充信息：该车已行驶8万公里"、"之前换过电池包"、"这是新车，刚交付3天"
+   示例："补充信息：该车已行驶8万公里"、"之前换过MCU"、"这是新车"
 
 4. **working_condition_file**：工况文件。用户上传的是工况数据文件（非标准 xlsx/csv 工单），需要先转换。
-   示例：文件扩展名是 .asc/.blf/.mdf 等非标准格式，或文件内容是时间序列工况数据
+   示例：文件扩展名是 .asc/.blf/.mdf 等非标准格式
+
+5. **out_of_scope**：非电驱系统问题。用户的问题与电驱系统（MCU/电机/逆变器）无关。
+   关键词示例：动力电池包故障、音响、车身、制动 / 转向底盘、空调热管理、充电枪 OBC、整车高压配电盒
 
 任务要求：
 1. 根据输入内容进行分类
 2. 如果是 diagnostic_query，从用户输入中提取核心故障描述作为 search_query，不要使用示例中的内容
 3. 如果不是 diagnostic_query，search_query 保持为空字符串
+4. 只有明确与电驱系统相关的故障才归类为 diagnostic_query，否则归为 out_of_scope
 """
 
 
@@ -204,13 +208,23 @@ class InputRouter:
                 f"search_query={parsed_input.search_query[:50] if parsed_input.search_query else 'None'}"
             )
 
-            # 如果是诊断查询，进行字段提取
+            # 如果是诊断查询，进行字段提取（仅当 entities 为空时）
             if parsed_input.intent == InputIntent.DIAGNOSTIC_QUERY:
-                try:
-                    extractor = FieldExtractor()
-                    parsed_input.field_extraction = extractor.extract(text)
-                except Exception as e:
-                    logger.warning(f"字段提取失败: {e}")
+                if parsed_input.entities is None:
+                    try:
+                        extractor = FieldExtractor()
+                        record = extractor.extract(text)
+                        parsed_input.entities = StandardEntities(
+                            dtc_code=[record.dtc_code] if record.dtc_code else [],
+                            project=record.vehicle_type or "",
+                            component="",
+                            working_condition=record.fault_scenario or "",
+                            software_version="",
+                        )
+                        # 兼容：同时写入 field_extraction（文件解析路径可能依赖）
+                        parsed_input.field_extraction = record
+                    except Exception as e:
+                        logger.warning(f"字段提取失败: {e}")
 
         except Exception as e:
             logger.warning(f"InputRouter LLM 调用失败，使用规则回退: {e}")

@@ -2,12 +2,17 @@
 
 串联全链路：输入解析 → 意图路由 → 检索 → 推理 → 报告生成
 
+支持两种输入模式：
+1. 传统模式：文本/文件输入，内部转换为 ParsedInput
+2. 标准接口模式：JSON 输入，使用 StandardInput/StandardOutput
+
 CLI 启动时统一展示模型配置状态。
 支持批量导入和批量诊断。
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 from pathlib import Path
@@ -22,7 +27,8 @@ from rich.table import Table
 from .agent.input_router import InputRouter
 from .agent.langchain_agent import LangChainDiagnosticAgent
 from .config import Settings, get_settings, reset_settings
-from .models.input import InputIntent, InputType
+from .models.converter import diagnostic_output_to_standard
+from .models.input import InputIntent, InputType, StandardEntities, StandardInput
 from .parsers.unified import parse_input
 from .reporting.entries import generate_both as generate_db_entries
 from .reporting.markdown import generate_markdown_report
@@ -144,10 +150,22 @@ def diagnose(
     text: Optional[str] = typer.Option(None, "--text", "-t", help="故障描述文本"),
     file: Optional[List[str]] = typer.Option(None, "--file", "-f", help="输入文件路径 (CSV/XLSX)，支持多个文件"),
     files: Optional[str] = typer.Option(None, "--files", help="包含多个文件的目录路径"),
+    json_input: Optional[str] = typer.Option(None, "--json-input", help="标准输入JSON文件路径（平台Agent传入的格式）"),
     output_dir: str = typer.Option("output", "--output", "-o", help="报告输出目录"),
+    generate_md: bool = typer.Option(False, "--generate-md", "-g", help="生成Markdown报告（调试用）"),
+    std_output: bool = typer.Option(False, "--std-output", help="输出标准JSON格式到控制台"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
 ):
-    """执行故障诊断（支持多个文件或目录）"""
+    """执行故障诊断
+
+    支持两种输入模式：
+    1. 传统模式：使用 --text/-f/--files 传入文本或文件
+    2. 标准接口模式：使用 --json-input 传入标准JSON文件
+
+    输出可选：
+    - 标准JSON（默认）：使用 --std-output 输出到控制台
+    - Markdown报告（--generate-md）：调试用，生成详细报告
+    """
 
     _setup_logging(verbose)
     reset_settings()
@@ -155,6 +173,86 @@ def diagnose(
 
     console.print(Panel.fit("🔍 故障诊断 Agent", style="bold blue"))
     _print_model_status(settings)
+
+    # 标准接口模式：JSON输入
+    if json_input:
+        console.print(f"[dim]使用标准接口模式，加载JSON输入: {json_input}[/dim]")
+
+        # 加载并解析 JSON
+        try:
+            with open(json_input, 'r', encoding='utf-8') as f:
+                raw_data = json.load(f)
+        except FileNotFoundError:
+            error_output = {"code": -1, "msg": f"JSON文件不存在: {json_input}"}
+            console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
+            return error_output
+        except json.JSONDecodeError as e:
+            error_output = {"code": -1, "msg": f"JSON解析失败: {e}"}
+            console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
+            return error_output
+
+        # 创建 StandardInput 并验证
+        try:
+            standard_input = StandardInput(**raw_data)
+        except Exception as e:
+            error_output = {"code": -1, "msg": f"入参缺失关键信息无法诊断: {e}"}
+            console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
+            return error_output
+
+        # 执行标准接口诊断
+        try:
+            agent = LangChainDiagnosticAgent(settings=settings)
+            standard_output = agent.diagnose_with_standard_input(standard_input)
+        except Exception as e:
+            error_output = {"code": -2, "msg": f"Agent输出异常: {e}"}
+            console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
+            return error_output
+
+        # 输出结果
+        if standard_output.code == 0:
+            console.print(Panel.fit("✅ 诊断完成", style="bold green"))
+            console.print(f"  状态码: [cyan]{standard_output.code}[/cyan]")
+            console.print(f"  状态: {standard_output.msg}")
+
+            if standard_output.diagnosis_result:
+                result = standard_output.diagnosis_result
+                console.print(f"  诊断置信度: {standard_output.diagnosis_confidence:.0%}")
+                console.print(f"  根因数量: {len(result.fault_root_cause)}")
+                console.print(f"  解决方案数量: {len(result.solution)}")
+
+            console.print()
+            console.print(f"  📄 标准输出JSON:")
+            console.print(json.dumps(standard_output.model_dump(), ensure_ascii=False, indent=2))
+        else:
+            # 错误状态只输出 code 和 msg
+            console.print(Panel.fit("⚠️ 诊断失败", style="bold red"))
+            error_output = {"code": standard_output.code, "msg": standard_output.msg}
+            console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
+            return error_output
+
+        # 生成 Markdown 报告（-g / --generate-md 开关）
+        if generate_md:
+            internal_output = agent._last_diagnostic_output
+            if internal_output:
+                md_path = generate_markdown_report(internal_output, output_dir=output_dir)
+                console.print(f"  📄 Markdown 报告: {md_path}")
+            else:
+                console.print("[yellow]  ⚠️ 无法生成Markdown报告: 内部诊断输出不可用[/yellow]")
+
+        # 保存到文件
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        json_output_path = output_path / f"diagnosis_output_{standard_input.mcuid}.json"
+        with open(json_output_path, 'w', encoding='utf-8') as f:
+            f.write(json.dumps(standard_output.model_dump(), ensure_ascii=False, indent=2))
+        console.print(f"\n  💾 已保存到: {json_output_path}")
+
+        return
+
+    # 传统模式：文本/文件输入
+    if not text and not file and not files:
+        console.print("[red]请指定输入：--text/-f/--files 或 --json-input[/red]")
+        raise typer.Exit(1)
 
     # 收集所有文件
     all_files = []
@@ -215,7 +313,7 @@ def diagnose(
         console.print(f"  检索 query: {parsed.search_query[:80]}...")
     console.print()
 
-    # 执行诊断（使用新的 LangChainDiagnosticAgent）
+    # 执行诊断
     try:
         agent = LangChainDiagnosticAgent(settings=settings)
         output = agent.diagnose(parsed)
@@ -223,8 +321,24 @@ def diagnose(
         console.print(f"[red]诊断失败: {e}[/red]")
         raise typer.Exit(1)
 
-    # 生成报告
-    md_path = generate_markdown_report(output, output_dir=output_dir)
+    # 生成报告（根据开关）
+    if generate_md:
+        md_path = generate_markdown_report(output, output_dir=output_dir)
+        console.print(f"  📄 Markdown 报告: {md_path}")
+
+    if std_output:
+        # 构造一个临时的StandardInput用于转换
+        temp_standard_input = StandardInput(
+            raw_query=parsed.description,
+            mcuid="CLI",
+            entities=StandardEntities(),
+        )
+        standard_output = diagnostic_output_to_standard(output, temp_standard_input)
+
+        console.print(Panel.fit("📋 标准JSON输出", style="bold blue"))
+        console.print(json.dumps(standard_output.model_dump(), ensure_ascii=False, indent=2))
+
+    # 生成数据库条目（始终生成）
     db_paths = generate_db_entries(output, output_dir=output_dir)
 
     console.print(Panel.fit("✅ 诊断完成", style="bold green"))
@@ -233,7 +347,8 @@ def diagnose(
     console.print(f"  推荐对策: {output.report.recommended_countermeasure[:100]}...")
     console.print(f"  置信度: {output.database_entry.diagnostic_confidence:.0%}")
     console.print()
-    console.print(f"  📄 Markdown 报告: {md_path}")
+    if generate_md:
+        console.print(f"  📄 Markdown 报告: [dim]已生成[/dim]")
     console.print(f"  📊 CSV 条目: {db_paths['csv']}")
     console.print(f"  📊 JSON 条目: {db_paths['json']}")
 

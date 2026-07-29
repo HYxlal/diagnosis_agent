@@ -1,6 +1,9 @@
 """LangChain Agent 实现
 
 基于 LangChain 最新架构的诊断 Agent，使用多源检索。
+支持两种输入模式：
+1. 传统模式：ParsedInput（内部解析输入）
+2. 标准接口模式：StandardInput（平台 Agent 传入的标准 JSON）
 """
 
 from __future__ import annotations
@@ -16,7 +19,17 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langchain_core.retrievers import BaseRetriever
 
 from ..config import Settings
-from ..models.diagnostic_output import DiagnosticResult
+from ..models.converter import (
+    build_error_output,
+    diagnostic_output_to_standard,
+    standard_input_to_parsed,
+    validate_standard_input,
+)
+from ..models.diagnostic_output import (
+    DiagnosticResult,
+    OutputCode,
+    StandardOutput,
+)
 from ..models.diagnosis import (
     DatabaseEntry,
     DiagnosticFinding,
@@ -26,7 +39,11 @@ from ..models.diagnosis import (
     ToolCallRecord,
     ReActStep,
 )
-from ..models.input import InputIntent, ParsedInput
+from ..models.input import (
+    InputIntent,
+    ParsedInput,
+    StandardInput,
+)
 from ..models.incident import IncidentRecord
 from ..retrieval.langchain_retrievers import (
     ChromaVectorRetriever,
@@ -64,6 +81,7 @@ class LangChainDiagnosticAgent:
             settings=settings,
         )
         self._agent = self._build_agent()
+        self._last_diagnostic_output: Optional[DiagnosticOutput] = None
 
     def _build_agent(self):
         """构建并缓存 Agent"""
@@ -87,8 +105,82 @@ class LangChainDiagnosticAgent:
         """注册工况文件转换工具"""
         self._tools.register_working_condition_converter(converter)
 
+    def diagnose_with_standard_input(
+        self,
+        standard_input: StandardInput,
+    ) -> StandardOutput:
+        """使用标准输入接口执行诊断
+
+        这是对外暴露的主入口方法，接收平台 Agent 传入的标准 JSON。
+
+        流程：
+        1. 验证输入
+        2. 转换为内部 ParsedInput
+        3. 调用内部 diagnose 方法
+        4. 转换为标准输出
+        """
+        # 1. 验证输入
+        validation_error = validate_standard_input(standard_input)
+        if validation_error:
+            logger.error(f"标准输入验证失败: {validation_error}")
+            return build_error_output(
+                code=OutputCode.MISSING_INPUT,
+                msg=validation_error,
+                standard_input=standard_input,
+            )
+
+        # 2. 转换为内部 ParsedInput
+        try:
+            parsed_input = standard_input_to_parsed(standard_input)
+        except Exception as e:
+            logger.error(f"输入转换失败: {e}")
+            return build_error_output(
+                code=OutputCode.INTERNAL_ERROR,
+                msg=f"输入转换失败: {str(e)}",
+                standard_input=standard_input,
+            )
+
+        # 3. 执行意图路由和诊断
+        try:
+            from ..agent.input_router import InputRouter
+            router = InputRouter(self.settings)
+            parsed_input = router.route(parsed_input)
+
+            # 检查是否为非电驱问题
+            if parsed_input.intent == InputIntent.OUT_OF_SCOPE:
+                logger.info("识别为非电驱系统问题，返回 -3 状态码")
+                return build_error_output(
+                    code=OutputCode.OUT_OF_SCOPE,
+                    msg="识别为非电驱系统问题，不执行诊断",
+                    standard_input=standard_input,
+                )
+
+            diagnostic_output = self.diagnose(parsed_input)
+        except Exception as e:
+            logger.error(f"诊断执行失败: {e}")
+            return build_error_output(
+                code=OutputCode.INTERNAL_ERROR,
+                msg=f"诊断执行失败: {str(e)}",
+                standard_input=standard_input,
+            )
+
+        # 4. 转换为标准输出
+        try:
+            standard_output = diagnostic_output_to_standard(
+                diagnostic_output,
+                standard_input,
+            )
+            return standard_output
+        except Exception as e:
+            logger.error(f"输出转换失败: {e}")
+            return build_error_output(
+                code=OutputCode.INTERNAL_ERROR,
+                msg=f"输出转换失败: {str(e)}",
+                standard_input=standard_input,
+            )
+
     def diagnose(self, parsed_input: ParsedInput) -> DiagnosticOutput:
-        """执行完整诊断流程"""
+        """执行完整诊断流程（内部方法）"""
         description = parsed_input.description or ""
 
         diagnosis_id = f"DIAG-{uuid.uuid4().hex[:8]}"
@@ -140,6 +232,12 @@ class LangChainDiagnosticAgent:
 
         tools_used = list(set(tc.tool_name for tc in tool_calls))
 
+        # 从新格式的推理结果中提取字段
+        root_causes = reasoning_result.get("fault_root_cause", [])
+        root_cause_text = root_causes[0] if root_causes else ""
+        solutions = reasoning_result.get("solution", [])
+        countermeasure_text = solutions[0] if solutions else ""
+
         report = DiagnosticReport(
             diagnosis_id=diagnosis_id,
             diagnosis_time=diagnosis_time,
@@ -147,7 +245,7 @@ class LangChainDiagnosticAgent:
             has_similar_cases=has_similar,
             similar_cases=similar_case_models,
             findings=findings,
-            recommended_countermeasure=reasoning_result.get("countermeasure", ""),
+            recommended_countermeasure=countermeasure_text,
             react_steps=react_steps,
             reasoning_narrative=reasoning_result.get("reasoning_narrative", ""),
             reasoning_chain=[s.thought for s in react_steps if s.thought],
@@ -157,24 +255,77 @@ class LangChainDiagnosticAgent:
 
         confidence = reasoning_result.get("confidence", 0.3)
 
+        # 从 entities / field_extraction / bulk_records 中获取字段
+        entities = parsed_input.entities
         field_extraction = parsed_input.field_extraction
+
+        problem_desc = description[:500]
+        if field_extraction and field_extraction.problem_description:
+            problem_desc = field_extraction.problem_description
+
+        dtc_code = ""
+        if entities and entities.dtc_code:
+            dtc_code = ", ".join(entities.dtc_code)
+        elif field_extraction and field_extraction.dtc_code:
+            dtc_code = field_extraction.dtc_code
+        else:
+            dtc_code = self._extract_from_records(parsed_input, "dtc_code")
+
+        vehicle_type = ""
+        if entities and entities.project:
+            vehicle_type = entities.project
+        elif field_extraction and field_extraction.vehicle_type:
+            vehicle_type = field_extraction.vehicle_type
+        else:
+            vehicle_type = self._extract_from_records(parsed_input, "vehicle_type")
+
+        component = ""
+        if entities and entities.component:
+            component = entities.component
+
+        fault_scenario = ""
+        if entities and entities.working_condition:
+            fault_scenario = entities.working_condition
+        elif field_extraction and field_extraction.fault_scenario:
+            fault_scenario = field_extraction.fault_scenario
+        else:
+            fault_scenario = self._extract_from_records(parsed_input, "fault_scenario")
+
+        drive_code = ""
+        if field_extraction and field_extraction.drive_code:
+            drive_code = field_extraction.drive_code
+        else:
+            drive_code = self._extract_from_records(parsed_input, "drive_code")
+
+        dashboard_indicator = ""
+        if field_extraction and field_extraction.dashboard_indicator:
+            dashboard_indicator = field_extraction.dashboard_indicator
+        else:
+            dashboard_indicator = self._extract_from_records(parsed_input, "dashboard_indicator")
+
         database_entry = DatabaseEntry(
             diagnosis_id=diagnosis_id,
             diagnosis_time=diagnosis_time,
-            problem_description=field_extraction.problem_description if field_extraction else description[:500],
-            root_cause=reasoning_result.get("root_cause", ""),
-            countermeasure=reasoning_result.get("countermeasure", ""),
-            drive_code=field_extraction.drive_code if field_extraction else self._extract_from_records(parsed_input, "drive_code"),
-            vehicle_type=field_extraction.vehicle_type if field_extraction else self._extract_from_records(parsed_input, "vehicle_type"),
-            dashboard_indicator=field_extraction.dashboard_indicator if field_extraction else self._extract_from_records(parsed_input, "dashboard_indicator"),
-            dtc_code=field_extraction.dtc_code if field_extraction else self._extract_from_records(parsed_input, "dtc_code"),
-            fault_scenario=field_extraction.fault_scenario if field_extraction else self._extract_from_records(parsed_input, "fault_scenario"),
+            problem_description=problem_desc,
+            root_cause=root_cause_text,
+            countermeasure=countermeasure_text,
+            drive_code=drive_code,
+            vehicle_type=vehicle_type,
+            dashboard_indicator=dashboard_indicator,
+            dtc_code=dtc_code,
+            fault_scenario=fault_scenario,
             diagnostic_confidence=confidence,
             based_on_similar=has_similar,
             similar_record_ids=[c.get("record_id", "") for c in similar_cases],
         )
 
-        return DiagnosticOutput(report=report, database_entry=database_entry)
+        diagnostic_output = DiagnosticOutput(
+            report=report,
+            database_entry=database_entry,
+            reasoning_result=reasoning_result,
+        )
+        self._last_diagnostic_output = diagnostic_output
+        return diagnostic_output
 
     def _run_agent(
         self,
@@ -211,9 +362,22 @@ class LangChainDiagnosticAgent:
 
     def _build_system_prompt(self) -> str:
         """构建系统 prompt"""
-        return f"""你是一个专业的车辆故障诊断专家 Agent。
+        return f"""你是一个专业的车辆故障诊断专家 Agent，专注于电驱系统（MCU/电机/逆变器）故障诊断。
 
-你的任务：分析故障描述，调用工具检索历史工单，输出诊断结论和推荐对策。
+你的任务：分析故障描述，调用工具检索历史工单，输出结构化的诊断结论。
+
+## 故障分类选项（必须从以下列表中选择一个）
+
+- 驱动异常故障
+- 控制异常故障
+- 超速故障
+- 高压异常故障
+- 低压异常故障
+- 过温故障
+- 通信故障
+- 旋变故障
+- 状态机故障
+- 油泵故障
 
 ## 诊断推理原则
 
@@ -221,7 +385,11 @@ class LangChainDiagnosticAgent:
 2. **检索相似工况**：使用 search_similar_incidents 工具搜索历史工单
 3. **对比分析**：将当前故障与历史工单对比，分析异同
 4. **推理根因**：基于证据推理可能的根本原因，排除不合理的假设
-5. **制定对策**：给出针对性的解决措施
+5. **结构化输出**：
+   - fault_root_cause：列出2-3个最可能的具体原因
+   - solution：列出可执行的解决步骤
+   - classification：从故障分类选项中选择最匹配的分类
+   - risk_warning：评估故障的风险等级
 
 ## 最终答案格式
 
@@ -229,8 +397,12 @@ class LangChainDiagnosticAgent:
 
 ```json
 {{
-  "root_cause": "根本原因分析",
-  "countermeasure": "推荐对策/解决措施",
+  "fault_root_cause": ["具体原因1", "具体原因2", "具体原因3"],
+  "fault_trigger_condition": "故障触发条件描述",
+  "classification": "从故障分类选项中选择一个",
+  "solution": ["解决方案步骤1", "解决方案步骤2", "解决方案步骤3"],
+  "risk_warning": "风险预警等级（V1=高风险/V2=中风险/V3=低风险）",
+  "maintenance_suggestions": "长期维护建议",
   "confidence": 0.85,
   "reasoning_narrative": "完整的推断过程叙述（200-500字）",
   "findings": [
@@ -244,6 +416,8 @@ class LangChainDiagnosticAgent:
 }}
 ```
 
+注意：所有字段都必须填充，不可为空数组或空字符串。
+classification 必须从给定的故障分类选项中选择。
 confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定，0.5 以下为推测。"""
 
     def _extract_tool_calls(self, messages: list[BaseMessage]) -> list[ToolCallRecord]:
@@ -365,15 +539,23 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
     def _get_default_result(self) -> dict:
         """返回默认结果"""
         return {
-            "root_cause": "详见推理叙述",
-            "countermeasure": "详见推理叙述",
+            "fault_root_cause": ["诊断过程中未能获取完整根因"],
+            "fault_trigger_condition": "",
+            "classification": "",
+            "solution": ["请查看推理叙述获取详细方案"],
+            "risk_warning": "",
+            "maintenance_suggestions": "",
             "confidence": 0.3,
             "reasoning_narrative": "诊断过程中未能获取完整的结构化输出",
             "findings": [],
         }
 
     def _retrieve_similar_cases(self, parsed_input: ParsedInput) -> list[dict]:
-        """使用检索器检索相似工况"""
+        """使用检索器检索相似工况
+
+        优先使用 search_query（由 InputRouter 提取），
+        否则回退到 description。mcuid 用于精确过滤。
+        """
         try:
             query = parsed_input.search_query or parsed_input.description or ""
             if not query:
@@ -411,9 +593,11 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
             ))
 
         if not findings:
+            root_causes = reasoning_result.get("fault_root_cause", [])
+            description = root_causes[0] if root_causes else "无明确根因"
             findings.append(DiagnosticFinding(
                 title="诊断结论",
-                description=reasoning_result.get("root_cause", "无明确根因"),
+                description=description,
                 confidence=reasoning_result.get("confidence", 0.3),
                 evidence=[],
             ))

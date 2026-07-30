@@ -470,7 +470,7 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
 
         # 第一遍：建立工具调用记录索引（key=tool_call_id）
         for msg in messages:
-            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+            if isinstance(msg, AIMessage) and msg.tool_calls:
                 for tc in msg.tool_calls:
                     tc_id = tc.get('id', '')
                     tc_record = ToolCallRecord(
@@ -485,7 +485,7 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
 
         # 第二遍：根据 tool_call_id 关联 ToolMessage 的返回结果
         for msg in messages:
-            if isinstance(msg, ToolMessage) and hasattr(msg, 'tool_call_id'):
+            if isinstance(msg, ToolMessage):
                 tc_id = msg.tool_call_id
                 if tc_id in tool_call_map:
                     result_content = msg.content

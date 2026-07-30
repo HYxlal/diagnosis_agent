@@ -53,15 +53,13 @@ class QueryFaultGraphInput(BaseModel):
 
     字段直接对齐 StandardInput.entities：
     mcuid / dtc_code / project / component / working_condition / software_version
-
-    list 参数都用逗号分隔的字符串传入（LLM 输出 list 容易序列化出错）。
     """
     mcuid: Optional[str] = Field(
         default=None, description="MCU 标识（可选，如 MCU_001）"
     )
-    dtc_code: Optional[str] = Field(
+    dtc_code: Optional[list[str]] = Field(
         default=None,
-        description="DTC 码，多个用逗号分隔（如 P1A3E98 或 P1A3E98,U1624）",
+        description="DTC 码列表（可选，如 ['P1A3E98', 'U1624']）",
     )
     project: Optional[str] = Field(
         default=None,
@@ -192,7 +190,7 @@ class DiagnosticTools:
     def _query_fault_graph_impl(
         self,
         mcuid: Optional[str] = None,
-        dtc_code: Optional[str] = None,
+        dtc_code: Optional[list[str]] = None,
         project: Optional[str] = None,
         component: Optional[str] = None,
         working_condition: Optional[str] = None,
@@ -213,19 +211,23 @@ class DiagnosticTools:
         if not neo4j_retriever.available:
             return [{"error": "Neo4j 不可用（未配置或连接失败）"}]
 
-        def _split(v: Optional[str]) -> Optional[list[str]]:
-            if not v:
-                return None
-            return [x.strip() for x in v.split(",") if x.strip()]
-
         # 当前 Neo4j schema 尚未按新字段重构，
         # 除 dtc_code 外其余字段统一作为 keyword 模糊匹配。
-        keyword_parts = [p for p in [project, component, working_condition, software_version] if p]
-        keyword = " ".join(keyword_parts) if keyword_parts else None
+        # 与 HybridRetriever._neo4j_recall 统一用 SearchCondition.to_keyword()。
+        from ..retrieval.search_condition import SearchCondition
+        cond = SearchCondition(
+            mcuid=mcuid,
+            dtc_code=dtc_code or [],
+            project=project,
+            component=component,
+            working_condition=working_condition,
+            software_version=software_version,
+        )
+        keyword = cond.to_keyword() or None
 
         candidates = neo4j_retriever.structured_recall(
             mcuid=mcuid,
-            dtc_codes=_split(dtc_code),
+            dtc_codes=dtc_code or None,
             keyword=keyword,
             depth=depth,
             limit=top_k,

@@ -282,8 +282,8 @@ def create_hybrid_retriever(settings: Optional[Settings] = None) -> HybridRetrie
 
     # 复用 chroma 的 embedding_fn，避免重复初始化模型
     embedding_fn = None
-    if hasattr(chroma, "store") and hasattr(chroma.store, "_embedding_fn"):
-        embedding_fn = chroma.store._embedding_fn
+    if hasattr(chroma, "store") and chroma.store is not None:
+        embedding_fn = chroma.store.embedding_function
 
     reranker = SemanticReranker(embedding_fn=embedding_fn)
 

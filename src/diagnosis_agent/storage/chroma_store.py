@@ -58,6 +58,11 @@ class ChromaVectorStore(VectorStoreAdapter):
             metadata={"hnsw:space": "cosine"},
         )
 
+    @property
+    def embedding_function(self) -> Optional[Any]:
+        """返回当前使用的 embedding 函数（供 reranker 等模块复用）"""
+        return self._embedding_fn
+
         logger.info(
             f"ChromaVectorStore 初始化: dir={persist_dir}, "
             f"collection={collection_name}, count={self._collection.count()}"

@@ -18,10 +18,8 @@ from .neo4j_retriever import Neo4jFaultRetriever
 from .reranker import SemanticReranker
 from .langchain_retrievers import (
     ChromaVectorRetriever,
-    Neo4jGraphRetriever,
     document_to_record,
     create_chroma_retriever,
-    create_neo4j_retriever,
 )
 
 __all__ = [
@@ -35,8 +33,6 @@ __all__ = [
     "Neo4jFaultRetriever",
     "SemanticReranker",
     "ChromaVectorRetriever",
-    "Neo4jGraphRetriever",
     "document_to_record",
     "create_chroma_retriever",
-    "create_neo4j_retriever",
 ]

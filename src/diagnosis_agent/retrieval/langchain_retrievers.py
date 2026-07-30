@@ -1,7 +1,7 @@
-"""基于 LangChain BaseRetriever 的检索器实现
+"""基于 LangChain BaseRetriever 的 Chroma 向量检索器
 
 统一检索器接口，支持与 LangChain 生态无缝集成。
-当前提供 Chroma 向量检索；Neo4jGraphRetriever 为预留接口。
+Neo4j 知识图谱检索已迁移到 neo4j_retriever / hybrid_retriever 模块。
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any, Optional
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 
-from ..models.incident import INCIDENT_COLUMNS, COLUMN_EN_TO_CN, IncidentRecord
+from ..models.incident import COLUMN_EN_TO_CN, IncidentRecord
 from ..config import get_settings
 from ..storage.chroma_store import ChromaVectorStore
 
@@ -107,22 +107,6 @@ class ChromaVectorRetriever(BaseRetriever):
             return []
 
 
-class Neo4jGraphRetriever(BaseRetriever):
-    """基于 Neo4j 知识图谱的检索器
-
-    预留接口，用于后续集成知识图谱加权检索。
-    """
-
-    def _get_relevant_documents(self, query: str) -> list[Document]:
-        """知识图谱检索（同步）"""
-        try:
-            logger.info(f"Neo4j知识图谱检索: query='{query[:50]}...'")
-            return []
-        except Exception as e:
-            logger.error(f"Neo4j知识图谱检索失败: {e}")
-            return []
-
-
 def document_to_record(doc: Document) -> IncidentRecord:
     """将 LangChain Document 转换为 IncidentRecord"""
     data = {}
@@ -168,6 +152,3 @@ def create_chroma_retriever() -> ChromaVectorRetriever:
     )
 
 
-def create_neo4j_retriever() -> Neo4jGraphRetriever:
-    """创建 Neo4j 知识图谱检索器"""
-    return Neo4jGraphRetriever()

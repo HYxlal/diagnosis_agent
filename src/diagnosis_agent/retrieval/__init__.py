@@ -16,6 +16,7 @@ from .field_mapper import FieldMapper
 from .hybrid_retriever import HybridRetriever, create_hybrid_retriever
 from .neo4j_retriever import Neo4jFaultRetriever
 from .reranker import SemanticReranker
+from .search_condition import SearchCondition
 from .langchain_retrievers import (
     ChromaVectorRetriever,
     document_to_record,
@@ -25,6 +26,7 @@ from .langchain_retrievers import (
 __all__ = [
     "FaultRetriever",
     "FieldMapper",
+    "SearchCondition",
     "QueryCondition",
     "build_query",
     "build_count_query",

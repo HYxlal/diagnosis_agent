@@ -10,6 +10,13 @@
 
 字段映射从 FieldMapper 取，不再在编排层散写映射。
 Cypher 构建由本模块自己实现，不依赖 fault_knowledge_graph 项目。
+
+当前字段重构（经验探索版）：
+- 搜索条件直接对齐 StandardInput.entities：
+  mcuid / dtc_code / project / component / working_condition / software_version
+- 不映射到 IncidentRecord 的 8 列表头，也不映射到 Neo4j 节点属性名。
+- Neo4j schema 尚未重构，因此把新字段作为 keyword 模糊匹配传入，
+  同时保留 dtc_code 的旧路径召回；等 Neo4j schema 对齐后再精确过滤。
 """
 
 from __future__ import annotations
@@ -26,6 +33,7 @@ from .field_mapper import FieldMapper
 from .langchain_retrievers import ChromaVectorRetriever, create_chroma_retriever
 from .neo4j_retriever import Neo4jFaultRetriever
 from .reranker import SemanticReranker
+from .search_condition import SearchCondition
 
 logger = logging.getLogger(__name__)
 
@@ -116,16 +124,16 @@ class HybridRetriever(FaultRetriever):
         if not query:
             return []
 
-        structural_fields = FieldMapper.extract_structural_fields(parsed_input)
+        condition = FieldMapper.extract_search_condition(parsed_input)
         top_k = self._top_k
 
         # 按策略分流
         if self._strategy == "chroma_only":
             logger.info("strategy=chroma_only，直接走 Chroma 语义检索")
-            return self._chroma_fallback(query, top_k)
+            return self._chroma_fallback(query, top_k, condition)
 
         # neo4j_first / hybrid 都走 Neo4j 召回
-        candidates = self._neo4j_recall(structural_fields)
+        candidates = self._neo4j_recall(condition)
 
         neo4j_available = self._neo4j.available
         if not candidates:
@@ -136,14 +144,14 @@ class HybridRetriever(FaultRetriever):
                     logger.warning("Neo4j 不可用且未启用 Chroma 降级。")
             else:
                 logger.info("Neo4j 召回为空，走 Chroma 兜底。")
-            return self._chroma_fallback(query, top_k)
+            return self._chroma_fallback(query, top_k, condition)
 
         # Stage 2: 精排（返回 FaultCandidate 列表）
         ranked_candidates = self._reranker.rerank(
             query=query,
             candidates=candidates,
             top_k=top_k,
-            structural_fields=structural_fields,
+            structural_fields=condition.to_rerank_fields(),
         )
 
         ranked = [c.to_document() for c in ranked_candidates]
@@ -154,7 +162,7 @@ class HybridRetriever(FaultRetriever):
                 f"精排后仅 {len(ranked)} 条 (< {self._min_candidates})，"
                 "用 Chroma 语义检索补充。"
             )
-            chroma_docs = self._chroma_fallback(query, top_k)
+            chroma_docs = self._chroma_fallback(query, top_k, condition)
             ranked = self._merge_no_duplicate(ranked, chroma_docs, top_k)
 
         return ranked[:top_k]
@@ -163,42 +171,51 @@ class HybridRetriever(FaultRetriever):
     # Stage 1: Neo4j 召回
     # ------------------------------------------------------------------
 
-    def _neo4j_recall(self, structural_fields: dict) -> list:
-        """调用 Neo4j 召回"""
+    def _neo4j_recall(self, condition: SearchCondition) -> list:
+        """调用 Neo4j 召回
+
+        当前 Neo4j schema 尚未按新字段重构，因此：
+        - dtc_code 仍走旧的 HAS_DTC 路径
+        - 其余字段（mcuid/project/component/working_condition/software_version）
+          统一作为 keyword 在 Fault.description / full_text 中模糊匹配
+        """
         if not self._neo4j.available:
             return []
 
+        keyword = condition.to_keyword()
+
         return self._neo4j.structured_recall(
-            mcuid=structural_fields.get("mcuid") or None,
-            dtc_codes=structural_fields.get("dtc_codes") or None,
-            scenarios=structural_fields.get("scenarios") or None,
-            indicators=structural_fields.get("indicators") or None,
-            vehicle_types=structural_fields.get("vehicle_types") or None,
-            component=structural_fields.get("component") or None,
+            mcuid=condition.mcuid,
+            dtc_codes=condition.dtc_code or None,
+            keyword=keyword or None,
         )
 
     # ------------------------------------------------------------------
     # Stage 3: Chroma 兜底
     # ------------------------------------------------------------------
 
-    def _chroma_fallback(self, query: str, top_k: int) -> list[Document]:
+    def _chroma_fallback(
+        self,
+        query: str,
+        top_k: int,
+        condition: SearchCondition,
+    ) -> list[Document]:
         """Chroma 语义检索兜底
 
-        注意：当前不使用 mcuid 做 metadata 过滤。原因是 mcuid 是新字段，
-        老 Chroma 库的 drive_code 值（如 L200B-2、L255）与 mcuid
-        （如 MCU_001）格式不一致，过滤会把结果全过滤掉。
-        待数据重构、Chroma metadata 统一加入 mcuid 字段后，
-        可在此处恢复 mcuid 过滤以提升兜底精度。
+        把结构化字段拼入 query，提升语义匹配相关性。
+        当前不使用 mcuid 做 metadata 过滤（Chroma metadata 还未加入 mcuid）。
         """
+        enriched_query = self._build_chroma_query(query, condition)
+
         try:
             if hasattr(self._chroma, "search_with_filters"):
                 docs = self._chroma.search_with_filters(
-                    query=query,
+                    query=enriched_query,
                     drive_code=None,
                     top_k=top_k,
                 )
             else:
-                docs = self._chroma.invoke(query)[:top_k]
+                docs = self._chroma.invoke(enriched_query)[:top_k]
         except Exception as e:
             logger.error(f"Chroma 兜底检索失败: {e}")
             return []
@@ -206,6 +223,24 @@ class HybridRetriever(FaultRetriever):
         for doc in docs:
             doc.metadata["source"] = "chroma"
         return docs
+
+    @staticmethod
+    def _build_chroma_query(query: str, condition: SearchCondition) -> str:
+        """把搜索条件拼入 Chroma 查询文本"""
+        parts = [query]
+        if condition.mcuid:
+            parts.append(condition.mcuid)
+        if condition.dtc_code:
+            parts.extend(condition.dtc_code)
+        if condition.project:
+            parts.append(condition.project)
+        if condition.component:
+            parts.append(condition.component)
+        if condition.working_condition:
+            parts.append(condition.working_condition)
+        if condition.software_version:
+            parts.append(condition.software_version)
+        return " ".join(parts)
 
     # ------------------------------------------------------------------
     # 工具方法

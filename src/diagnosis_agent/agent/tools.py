@@ -51,30 +51,33 @@ class ConvertWorkingConditionFileInput(BaseModel):
 class QueryFaultGraphInput(BaseModel):
     """query_fault_graph 工具输入模型
 
+    字段直接对齐 StandardInput.entities：
+    mcuid / dtc_code / project / component / working_condition / software_version
+
     list 参数都用逗号分隔的字符串传入（LLM 输出 list 容易序列化出错）。
     """
-    motor_code: Optional[str] = Field(
-        default=None, description="电驱代号（可选，如 L160A、H37A）"
+    mcuid: Optional[str] = Field(
+        default=None, description="MCU 标识（可选，如 MCU_001）"
     )
-    dtc_codes: Optional[str] = Field(
+    dtc_code: Optional[str] = Field(
         default=None,
         description="DTC 码，多个用逗号分隔（如 P1A3E98 或 P1A3E98,U1624）",
     )
-    scenarios: Optional[str] = Field(
+    project: Optional[str] = Field(
         default=None,
-        description="故障场景，多个用逗号分隔",
+        description="项目型号/车型代号（可选，如 H37A）",
     )
-    indicators: Optional[str] = Field(
+    component: Optional[str] = Field(
         default=None,
-        description="仪表指示灯，多个用逗号分隔",
+        description="涉及部件（可选，如 IGBT/MCU）",
     )
-    vehicle_types: Optional[str] = Field(
+    working_condition: Optional[str] = Field(
         default=None,
-        description="车辆类型，多个用逗号分隔",
+        description="工作条件描述（可选，如 爬坡满载、低温冷启动）",
     )
-    keyword: Optional[str] = Field(
+    software_version: Optional[str] = Field(
         default=None,
-        description="关键词（可选，在故障描述中搜索，如查特定部件）",
+        description="软件版本信息（可选，如 H37A3621830AW）",
     )
     depth: Optional[int] = Field(
         default=1, description="关系扩展深度（1=直接关系，2=两度关系）"
@@ -188,12 +191,12 @@ class DiagnosticTools:
 
     def _query_fault_graph_impl(
         self,
-        motor_code: Optional[str] = None,
-        dtc_codes: Optional[str] = None,
-        scenarios: Optional[str] = None,
-        indicators: Optional[str] = None,
-        vehicle_types: Optional[str] = None,
-        keyword: Optional[str] = None,
+        mcuid: Optional[str] = None,
+        dtc_code: Optional[str] = None,
+        project: Optional[str] = None,
+        component: Optional[str] = None,
+        working_condition: Optional[str] = None,
+        software_version: Optional[str] = None,
         depth: Optional[int] = 1,
         top_k: Optional[int] = 10,
     ) -> list[dict]:
@@ -202,7 +205,7 @@ class DiagnosticTools:
         Agent 主动发起点结构化查询时调用，返回结构化命中的全量候选
         （不像预检索走精排只给 top-K）。
 
-        list 参数都用逗号分隔字符串传入，内部 split 成 list。
+        字段对齐 StandardInput.entities。
         """
         neo4j_retriever = getattr(self.retriever, "neo4j", None)
         if neo4j_retriever is None:
@@ -215,13 +218,15 @@ class DiagnosticTools:
                 return None
             return [x.strip() for x in v.split(",") if x.strip()]
 
+        # 当前 Neo4j schema 尚未按新字段重构，
+        # 除 dtc_code 外其余字段统一作为 keyword 模糊匹配。
+        keyword_parts = [p for p in [project, component, working_condition, software_version] if p]
+        keyword = " ".join(keyword_parts) if keyword_parts else None
+
         candidates = neo4j_retriever.structured_recall(
-            mcuid=motor_code,
-            dtc_codes=_split(dtc_codes),
-            scenarios=_split(scenarios),
-            indicators=_split(indicators),
-            vehicle_types=_split(vehicle_types),
-            component=keyword,
+            mcuid=mcuid,
+            dtc_codes=_split(dtc_code),
+            keyword=keyword,
             depth=depth,
             limit=top_k,
         )
@@ -232,7 +237,7 @@ class DiagnosticTools:
                 "description": c.description,
                 "root_cause": c.root_cause,
                 "solution": c.solution,
-                "dtc_codes": c.dtc_codes,
+                "dtc_code": c.dtc_codes,
                 "motor_code": c.motor_code,
                 "vehicle_type": c.vehicle_type,
                 "indicators": c.indicators,
@@ -280,11 +285,11 @@ class DiagnosticTools:
                 name="query_fault_graph",
                 description=(
                     "按结构化字段精确查询故障知识图谱。"
-                    "参数：motor_code（电驱代号）、dtc_codes（DTC码列表）、"
-                    "scenarios（故障场景）、indicators（仪表指示灯）、"
-                    "vehicle_types（车辆类型）、keyword（描述关键词）、"
+                    "参数：mcuid（MCU标识）、dtc_code（DTC码，多个逗号分隔）、"
+                    "project（项目/车型代号）、component（涉及部件）、"
+                    "working_condition（工作条件）、software_version（软件版本）、"
                     "depth（关系扩展深度1-2）、top_k（返回数量）。"
-                    "适合用确定的结构化字段（如 DTC、电驱代号）做精确召回。"
+                    "适合用确定的结构化字段（如 DTC、MCU标识）做精确召回。"
                 ),
                 args_schema=QueryFaultGraphInput,
             ),

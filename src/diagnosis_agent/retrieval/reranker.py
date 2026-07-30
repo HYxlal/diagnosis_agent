@@ -115,7 +115,7 @@ class SemanticReranker:
             candidates: 召回层返回的候选
             top_k: 返回数量
             structural_fields: 输入中结构化字段，用于算 structural_match_ratio。
-                key 可选: mcuid, dtc_codes, scenarios, indicators, vehicle_types, component
+                key 可选: mcuid, dtc_code, project, component, working_condition, software_version
                 命中的字段越多，ratio 越高
 
         Returns:
@@ -167,37 +167,40 @@ class SemanticReranker:
         mcuid = fields.get("mcuid")
         if mcuid:
             total += 1
-            if mcuid and mcuid in candidate.motor_code:
+            if mcuid and (mcuid in candidate.motor_code or mcuid in candidate.description):
                 hit += 1
 
-        dtc_codes = fields.get("dtc_codes")
-        if dtc_codes:
+        dtc_code = fields.get("dtc_code")
+        if dtc_code:
             total += 1
-            if any(d in candidate.dtc_codes for d in dtc_codes):
+            if isinstance(dtc_code, list):
+                if any(d in candidate.dtc_codes for d in dtc_code):
+                    hit += 1
+            elif isinstance(dtc_code, str) and dtc_code in candidate.dtc_codes:
                 hit += 1
 
-        scenarios = fields.get("scenarios")
-        if scenarios:
+        project = fields.get("project")
+        if project:
             total += 1
-            if any(s and s in candidate.scenario for s in scenarios):
-                hit += 1
-
-        indicators = fields.get("indicators")
-        if indicators:
-            total += 1
-            if any(i in candidate.indicators for i in indicators):
-                hit += 1
-
-        vehicle_types = fields.get("vehicle_types")
-        if vehicle_types:
-            total += 1
-            if any(v in candidate.vehicle_type for v in vehicle_types):
+            if project in candidate.vehicle_type or project in candidate.description:
                 hit += 1
 
         component = fields.get("component")
         if component:
             total += 1
             if component in candidate.description:
+                hit += 1
+
+        working_condition = fields.get("working_condition")
+        if working_condition:
+            total += 1
+            if working_condition in candidate.scenario or working_condition in candidate.description:
+                hit += 1
+
+        software_version = fields.get("software_version")
+        if software_version:
+            total += 1
+            if software_version in candidate.description:
                 hit += 1
 
         return hit / total if total > 0 else 0.0

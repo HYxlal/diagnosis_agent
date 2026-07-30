@@ -4,10 +4,17 @@
 自己建 Neo4j 驱动连接，不再依赖 fault_knowledge_graph 项目。
 
 职责：
-- 输入结构化字段（mcuid/DTC/scenario/indicator/...）
+- 输入结构化字段（mcuid/DTC/keyword/...）
 - 调用 cypher_builder.build_query 生成 Cypher
 - 执行查询，把原始记录展平为 FaultCandidate
 - 连接失败时 catch 住，返回空列表（上层走 Chroma 兜底）
+
+当前阶段：
+- 外部字段已对齐 StandardInput.entities：dtc_code, project, component, working_condition, software_version。
+- 由于 Neo4j schema 尚未按新字段重构，本层仍按旧 schema 查询：
+  mcuid → motor_codes，dtc_code → dtc_inputs，其余字段统一作为 keyword。
+- 等 Neo4j schema 重构后，再把 project/component/working_condition/software_version
+  映射到对应节点属性。
 
 不在这里做的事：
 - 不做 embedding 精排（在 reranker.py）
@@ -80,22 +87,16 @@ class Neo4jFaultRetriever(FaultRetriever):
         self,
         mcuid: Optional[str] = None,
         dtc_codes: Optional[list[str]] = None,
-        scenarios: Optional[list[str]] = None,
-        indicators: Optional[list[str]] = None,
-        vehicle_types: Optional[list[str]] = None,
-        component: Optional[str] = None,
+        keyword: Optional[str] = None,
         depth: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> list[FaultCandidate]:
         """结构化召回
 
         Args:
-            mcuid: 电驱代号 → MotorType.code 模糊匹配
+            mcuid: MCU 标识 → 透传给 MotorType.code 模糊匹配
             dtc_codes: DTC 列表 → DTC.code 精确 / DTC.description 模糊
-            scenarios: 场景列表 → Scenario 三级结构（精确或模糊）
-            indicators: 仪表指示灯列表 → Indicator.name 模糊
-            vehicle_types: 车辆类型列表 → VehicleType.type 模糊
-            component: 部件 → 复用 keyword 字段，匹配 description（图里无 Component 节点）
+            keyword: 关键词 → 匹配 Fault.description / full_text
             depth: 关系扩展深度，None 用默认
             limit: 返回上限，None 用默认
 
@@ -107,15 +108,11 @@ class Neo4jFaultRetriever(FaultRetriever):
             return []
 
         motor_list = [mcuid] if mcuid else None
-        kw = component or None
 
         condition = QueryCondition(
             motor_codes=motor_list,
-            vehicle_types=vehicle_types,
-            indicators=indicators,
             dtc_inputs=dtc_codes,
-            scenarios=scenarios,
-            keyword=kw,
+            keyword=keyword,
             limit=limit or self._default_limit,
             depth=depth or self._default_depth,
         )
@@ -142,10 +139,9 @@ class Neo4jFaultRetriever(FaultRetriever):
             except Exception as e:
                 logger.warning(f"展平 Neo4j 记录失败: {e}, record={record}")
                 continue
-
         logger.info(
             f"Neo4j 召回: mcuid={mcuid}, dtc={dtc_codes}, "
-            f"scenario={scenarios} → {len(candidates)} 条候选"
+            f"keyword={keyword} → {len(candidates)} 条候选"
         )
         return candidates
 
@@ -163,11 +159,8 @@ class Neo4jFaultRetriever(FaultRetriever):
         fields = fields or {}
         candidates = self.structured_recall(
             mcuid=fields.get("mcuid") or None,
-            dtc_codes=fields.get("dtc_codes") or None,
-            scenarios=fields.get("scenarios") or None,
-            indicators=fields.get("indicators") or None,
-            vehicle_types=fields.get("vehicle_types") or None,
-            component=fields.get("component") or None,
+            dtc_codes=fields.get("dtc_code") or None,
+            keyword=fields.get("keyword") or None,
             limit=top_k or self._default_limit,
         )
         return candidates

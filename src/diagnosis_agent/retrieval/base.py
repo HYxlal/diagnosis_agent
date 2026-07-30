@@ -39,7 +39,7 @@ class FaultRetriever(ABC):
         Args:
             query: 查询文本（自然语言故障描述）
             fields: 结构化字段，key 可选：
-                mcuid, dtc_codes, scenarios, indicators, vehicle_types, component
+                mcuid, dtc_code, project, component, working_condition, software_version
             top_k: 返回数量
 
         Returns:

@@ -64,6 +64,8 @@ class HybridRetrievalConfig(BaseModel):
 
 
 class RetrievalConfig(BaseModel):
+    # 检索策略：chroma_only / neo4j_first / hybrid
+    strategy: str = "neo4j_first"
     semantic: SemanticRetrievalConfig = Field(default_factory=SemanticRetrievalConfig)
     filter: FilterRetrievalConfig = Field(default_factory=FilterRetrievalConfig)
     hybrid: HybridRetrievalConfig = Field(default_factory=HybridRetrievalConfig)
@@ -108,6 +110,9 @@ class Neo4jConfig(BaseModel):
     url: str = ""
     user: str = ""
     password: str = ""
+    min_candidates: int = 3       # Neo4j 召回少于此数 → 触发 Chroma 兜底
+    default_depth: int = 1       # 默认关系扩展深度
+    fallback_to_chroma: bool = True  # Neo4j 不可用时是否降级到 Chroma
 
 
 class Settings(BaseModel):

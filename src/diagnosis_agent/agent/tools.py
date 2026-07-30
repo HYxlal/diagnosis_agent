@@ -22,6 +22,7 @@ from ..config import Settings
 from ..models.incident import IncidentRecord
 from ..retrieval.langchain_retrievers import ChromaVectorRetriever, document_to_record
 from ..storage.vector_store import SearchResult
+from ..tools.can_converter_tool import build_can_converter_tool
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +38,6 @@ class SearchSimilarIncidentsInput(BaseModel):
     top_k: Optional[int] = Field(default=5, description="返回数量（可选，默认5）")
 
 
-class FilterByVehicleTypeInput(BaseModel):
-    """filter_by_vehicle_type 工具输入模型"""
-    vehicle_type: str = Field(description="车型名称（必填）")
-    top_k: Optional[int] = Field(default=10, description="返回数量（可选，默认10）")
-
-
 class GetIncidentDetailInput(BaseModel):
     """get_incident_detail 工具输入模型"""
     record_id: str = Field(description="记录ID（必填）")
@@ -51,6 +46,42 @@ class GetIncidentDetailInput(BaseModel):
 class ConvertWorkingConditionFileInput(BaseModel):
     """convert_working_condition_file 工具输入模型"""
     file_path: str = Field(description="工况文件路径（必填）")
+
+
+class QueryFaultGraphInput(BaseModel):
+    """query_fault_graph 工具输入模型
+
+    list 参数都用逗号分隔的字符串传入（LLM 输出 list 容易序列化出错）。
+    """
+    motor_code: Optional[str] = Field(
+        default=None, description="电驱代号（可选，如 L160A、H37A）"
+    )
+    dtc_codes: Optional[str] = Field(
+        default=None,
+        description="DTC 码，多个用逗号分隔（如 P1A3E98 或 P1A3E98,U1624）",
+    )
+    scenarios: Optional[str] = Field(
+        default=None,
+        description="故障场景，多个用逗号分隔",
+    )
+    indicators: Optional[str] = Field(
+        default=None,
+        description="仪表指示灯，多个用逗号分隔",
+    )
+    vehicle_types: Optional[str] = Field(
+        default=None,
+        description="车辆类型，多个用逗号分隔",
+    )
+    keyword: Optional[str] = Field(
+        default=None,
+        description="关键词（可选，在故障描述中搜索，如查特定部件）",
+    )
+    depth: Optional[int] = Field(
+        default=1, description="关系扩展深度（1=直接关系，2=两度关系）"
+    )
+    top_k: Optional[int] = Field(
+        default=10, description="返回数量（可选，默认10）"
+    )
 
 
 # ------------------------------------------------------------------
@@ -75,9 +106,6 @@ class DiagnosticTools:
         self._default_search_top_k = (
             settings.tools.search_top_k if settings else 5
         )
-        self._default_filter_top_k = (
-            settings.tools.filter_top_k if settings else 10
-        )
 
         self._working_condition_converter: Optional[Callable[[str], dict[str, Any]]] = None
 
@@ -96,10 +124,22 @@ class DiagnosticTools:
         vehicle_type: Optional[str] = None,
         top_k: Optional[int] = None,
     ) -> list[dict]:
-        """检索相似工单实现"""
+        """检索相似工单实现
+
+        优先用 HybridRetriever.semantic_search（走纯 Chroma 语义检索），
+        兼容旧 ChromaVectorRetriever 的 search_with_filters / invoke。
+        """
         k = top_k or self._default_search_top_k
 
-        if hasattr(self.retriever, 'search_with_filters'):
+        if hasattr(self.retriever, 'semantic_search'):
+            # HybridRetriever 路径
+            docs = self.retriever.semantic_search(
+                query=query,
+                vehicle_type=vehicle_type,
+                top_k=k,
+            )
+        elif hasattr(self.retriever, 'search_with_filters'):
+            # 旧 ChromaVectorRetriever 路径
             docs = self.retriever.search_with_filters(
                 query=query,
                 vehicle_type=vehicle_type,
@@ -110,47 +150,21 @@ class DiagnosticTools:
 
         return [self._doc_to_dict(doc) for doc in docs]
 
-    def _filter_by_vehicle_type_impl(self, vehicle_type: str, top_k: Optional[int] = None) -> list[dict]:
-        """按车型过滤实现（使用纯 metadata 过滤，不走 embedding 路径）"""
-        k = top_k or self._default_filter_top_k
-
-        if hasattr(self.retriever, 'store') and hasattr(self.retriever.store, 'filter'):
-            results = self.retriever.store.filter(
-                filters={"vehicle_type": vehicle_type},
-                top_k=k,
-            )
-            docs = []
-            for r in results:
-                metadata = r.metadata.copy()
-                metadata["id"] = r.id
-                metadata["score"] = r.score
-                docs.append(
-                    Document(
-                        page_content=r.content,
-                        metadata=metadata,
-                    )
-                )
-        elif hasattr(self.retriever, 'search_with_filters'):
-            docs = self.retriever.search_with_filters(
-                query=vehicle_type,
-                vehicle_type=vehicle_type,
-                top_k=k,
-            )
-        else:
-            docs = []
-
-        return [self._doc_to_dict(doc) for doc in docs]
-
     def _get_incident_detail_impl(self, record_id: str) -> Optional[dict]:
         """获取工单详情实现"""
         try:
-            if hasattr(self.retriever, 'store'):
+            # HybridRetriever 路径：通过 chroma 属性拿 store
+            store = None
+            if hasattr(self.retriever, 'chroma'):
+                store = getattr(self.retriever.chroma, 'store', None)
+            elif hasattr(self.retriever, 'store'):
                 store = self.retriever.store
-                if hasattr(store, '_collection'):
-                    result = store._collection.get(ids=[record_id])
-                    if result["ids"] and result["metadatas"]:
-                        record = IncidentRecord.from_dict(result["metadatas"][0])
-                        return record.to_dict()
+
+            if store and hasattr(store, '_collection'):
+                result = store._collection.get(ids=[record_id])
+                if result["ids"] and result["metadatas"]:
+                    record = IncidentRecord.from_dict(result["metadatas"][0])
+                    return record.to_dict()
         except Exception as e:
             logger.error(f"获取工单详情失败: {e}")
         return None
@@ -172,6 +186,62 @@ class DiagnosticTools:
             logger.error(f"工况文件转换失败: {e}")
             return {"error": str(e), "description": ""}
 
+    def _query_fault_graph_impl(
+        self,
+        motor_code: Optional[str] = None,
+        dtc_codes: Optional[str] = None,
+        scenarios: Optional[str] = None,
+        indicators: Optional[str] = None,
+        vehicle_types: Optional[str] = None,
+        keyword: Optional[str] = None,
+        depth: Optional[int] = 1,
+        top_k: Optional[int] = 10,
+    ) -> list[dict]:
+        """图查询实现：直接调 Neo4j 召回，不精排
+
+        Agent 主动发起点结构化查询时调用，返回结构化命中的全量候选
+        （不像预检索走精排只给 top-K）。
+
+        list 参数都用逗号分隔字符串传入，内部 split 成 list。
+        """
+        neo4j_retriever = getattr(self.retriever, "neo4j", None)
+        if neo4j_retriever is None:
+            return [{"error": "Neo4j 检索器不可用"}]
+        if not neo4j_retriever.available:
+            return [{"error": "Neo4j 不可用（未配置或连接失败）"}]
+
+        def _split(v: Optional[str]) -> Optional[list[str]]:
+            if not v:
+                return None
+            return [x.strip() for x in v.split(",") if x.strip()]
+
+        candidates = neo4j_retriever.structured_recall(
+            mcuid=motor_code,
+            dtc_codes=_split(dtc_codes),
+            scenarios=_split(scenarios),
+            indicators=_split(indicators),
+            vehicle_types=_split(vehicle_types),
+            component=keyword,
+            depth=depth,
+            limit=top_k,
+        )
+
+        return [
+            {
+                "fault_id": c.fault_id,
+                "description": c.description,
+                "root_cause": c.root_cause,
+                "solution": c.solution,
+                "dtc_codes": c.dtc_codes,
+                "motor_code": c.motor_code,
+                "vehicle_type": c.vehicle_type,
+                "indicators": c.indicators,
+                "scenario": c.scenario,
+                "source": "neo4j",
+            }
+            for c in candidates
+        ]
+
     @staticmethod
     def _doc_to_dict(doc) -> dict:
         """将 Document 转为字典"""
@@ -190,6 +260,13 @@ class DiagnosticTools:
 
         使用 StructuredTool.from_function 动态创建工具，
         正确绑定实例方法。
+
+        工具集：
+        - search_similar_incidents：语义检索（模糊匹配故障现象）
+        - query_fault_graph：结构化图查询（精确匹配 DTC/电驱代号/场景等，可扩展图关系）
+        - can_converter：CAN 报文文件转 CSV/Excel（结合 DBC 解码）
+        - get_incident_detail：工单详情
+        - convert_working_condition_file：工况文件转换
         """
         return [
             StructuredTool.from_function(
@@ -199,11 +276,19 @@ class DiagnosticTools:
                 args_schema=SearchSimilarIncidentsInput,
             ),
             StructuredTool.from_function(
-                func=self._filter_by_vehicle_type_impl,
-                name="filter_by_vehicle_type",
-                description="按车型精确过滤历史工单。参数：vehicle_type（车型名称）、top_k（返回数量，可选）。",
-                args_schema=FilterByVehicleTypeInput,
+                func=self._query_fault_graph_impl,
+                name="query_fault_graph",
+                description=(
+                    "按结构化字段精确查询故障知识图谱。"
+                    "参数：motor_code（电驱代号）、dtc_codes（DTC码列表）、"
+                    "scenarios（故障场景）、indicators（仪表指示灯）、"
+                    "vehicle_types（车辆类型）、keyword（描述关键词）、"
+                    "depth（关系扩展深度1-2）、top_k（返回数量）。"
+                    "适合用确定的结构化字段（如 DTC、电驱代号）做精确召回。"
+                ),
+                args_schema=QueryFaultGraphInput,
             ),
+            build_can_converter_tool(),
             StructuredTool.from_function(
                 func=self._get_incident_detail_impl,
                 name="get_incident_detail",

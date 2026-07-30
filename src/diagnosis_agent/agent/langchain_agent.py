@@ -17,7 +17,6 @@ from typing import Any, Optional
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
-from langchain_core.retrievers import BaseRetriever
 
 from ..config import Settings
 from ..models.converter import (
@@ -51,6 +50,7 @@ from ..retrieval.langchain_retrievers import (
     document_to_record,
     create_chroma_retriever,
 )
+from ..retrieval.hybrid_retriever import HybridRetriever, create_hybrid_retriever
 from ..utils.llm_factory import create_llm
 from .prompts import (
     build_similar_case_prompt,
@@ -93,10 +93,13 @@ class LangChainDiagnosticAgent:
         """初始化 LLM"""
         return create_llm(settings=self.settings)
 
-    def _init_retriever(self) -> BaseRetriever:
-        """初始化检索器"""
-        # create_chroma_retriever 用全局 settings，此处仅记录依赖
-        return create_chroma_retriever()
+    def _init_retriever(self) -> HybridRetriever:
+        """初始化检索器
+
+        使用 HybridRetriever：Neo4j 召回 + Embedding 精排 + Chroma 兜底。
+        Neo4j 不可用或未配置时，自动降级到纯 Chroma 语义检索。
+        """
+        return create_hybrid_retriever(settings=self.settings)
 
     def register_working_condition_converter(self, converter) -> None:
         """注册工况文件转换工具"""
@@ -234,6 +237,7 @@ class LangChainDiagnosticAgent:
                 dtc_code=c.get("dtc_code", ""),
                 fault_scenario=c.get("fault_scenario", ""),
                 similarity=c.get("similarity", 0.0),
+                source=c.get("source", "unknown"),
             )
             for c in similar_cases
         ]
@@ -387,6 +391,31 @@ class LangChainDiagnosticAgent:
 - 旋变故障
 - 状态机故障
 - 油泵故障
+
+## 可用工具
+
+1. **search_similar_incidents** — 语义检索历史工单
+   用途：按故障现象模糊匹配（描述相近但 DTC/电驱代号可能不同的案例）
+   适用：当需要找"现象像"的案例时
+
+2. **query_fault_graph** — 结构化图查询故障知识图谱
+   用途：按 DTC、电驱代号、场景、仪表指示灯等精确查询，可扩展图关系
+   适用：当有明确结构化字段（DTC 码、电驱代号）时，优先用此工具
+
+3. **can_converter** — CAN 报文转 CSV/Excel
+   用途：用户上传 .asc/.blf/.mf4 报文文件时，先转成结构化 CSV 再做信号分析
+   输入：file_path（报文文件）、dbc_path（DBC 文件）、output_dir、selected_signals（可选）、export_format（csv/xlsx/both）
+
+4. **get_incident_detail** — 查看工单详情
+5. **convert_working_condition_file** — 工况文件转换
+
+## 工具使用策略
+
+- 已有结构化字段（DTC 码、电驱代号、故障场景）时，**优先用 query_fault_graph**
+- 需要模糊匹配故障现象时，用 search_similar_incidents
+- 两个工具可组合使用：先 query_fault_graph 锁定结构化范围，再 search_similar_incidents 补现象
+- 用户上传 CAN 报文文件时，用 can_converter 先转成 CSV，再读取 CSV 做信号分析
+- 预检索阶段已自动走两段式（Neo4j 召回 + Embedding 精排 + Chroma 兜底），无需重复手动调用
 
 ## 诊断推理原则
 
@@ -604,17 +633,16 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
         }
 
     def _retrieve_similar_cases(self, parsed_input: ParsedInput) -> list[dict]:
-        """使用检索器检索相似工况
+        """使用 HybridRetriever 检索相似工况（两段式）
 
-        优先使用 search_query（由 InputRouter 提取），
-        否则回退到 description。mcuid 用于精确过滤。
+        HybridRetriever 内部按 strategy 配置编排：
+        - chroma_only : 只走 Chroma 语义检索
+        - neo4j_first: Neo4j 召回 → Embedding 精排 → Chroma 兜底
+        - hybrid     : 两段式全开
+        返回的每条 Document 在 metadata 里带 source 标签（"neo4j"/"chroma"）。
         """
         try:
-            query = parsed_input.search_query or parsed_input.description or ""
-            if not query:
-                return []
-
-            docs = self._retriever.invoke(query)
+            docs = self._retriever.retrieve_parsed(parsed_input)
 
             cases: list[dict] = []
             for doc in docs:
@@ -622,6 +650,7 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
                 record_dict = record.to_dict()
                 record_dict["record_id"] = doc.metadata.get("id", "")
                 record_dict["similarity"] = doc.metadata.get("score", 0.0)
+                record_dict["source"] = doc.metadata.get("source", "unknown")
                 cases.append(record_dict)
 
             return cases

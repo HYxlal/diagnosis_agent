@@ -17,6 +17,13 @@ build/
 .vscode/
 .idea/
 
+# 运行时测试产物（诊断报告、输出日志）
+data/test/*.md
+data/test/diagnosis_*.json
+data/test/test_run*.log
+data/test/test_stderr.log
+data/test/test_output*.json
+
 # Skills 安装目录与锁文件
 .agents/
 skills-lock.json

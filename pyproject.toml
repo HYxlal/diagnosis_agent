@@ -28,6 +28,7 @@ dependencies = [
     "langchain-chroma>=1.0.0",
     "langchain-community>=0.1.0",
     "requests>=2.28",
+    "neo4j>=5.22.0,<6.0",
 ]
 
 [project.optional-dependencies]

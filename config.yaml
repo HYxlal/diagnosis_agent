@@ -28,6 +28,11 @@ vector_store:
 
 # 检索配置
 retrieval:
+  # 检索策略：
+  # - chroma_only : 只用 Chroma 语义检索（最快，不依赖 Neo4j）
+  # - neo4j_first: Neo4j 结构化召回 + Embedding 精排，不足时走 Chroma 兜底
+  # - hybrid     : 两段式全开（Neo4j 召回 + 精排 + Chroma 兜底）
+  strategy: "neo4j_first"
   semantic:
     top_k: 5                 # 语义检索返回数量
     score_threshold: 0.3     # 相似度阈值（低于此值不返回）
@@ -74,3 +79,12 @@ paths:
   data_dir: "data"
   samples_dir: "data/samples"
   output_dir: "output"
+
+# Neo4j 故障知识图谱配置
+neo4j:
+  url: "${NEO4J_URI:bolt://localhost:7687}"
+  user: "${NEO4J_USER:neo4j}"
+  password: "${NEO4J_PASSWORD:}"
+  min_candidates: 3             # Neo4j 召回少于此数 → 触发 Chroma 兜底
+  default_depth: 1             # 默认关系扩展深度（1=直接关系，2=两度关系）
+  fallback_to_chroma: true     # Neo4j 不可用时是否降级到 Chroma 语义检索

@@ -1,7 +1,14 @@
 """Embedding 包装器
 
-解决阿里云 embedding API 与 langchain_openai.OpenAIEmbeddings 的兼容性问题。
-阿里云 API 对输入格式有特殊要求，需要进行格式转换。
+提供两种 embedding 实现，通过 `embedding.provider` 配置切换：
+
+1. `openai`（默认）：用 `langchain_openai.OpenAIEmbeddings`，适用于所有
+   OpenAI 兼容 API（阿里云百炼 /compatible-mode/v1/embeddings、DeepSeek、
+   Moonshot、本地 vLLM 等）。阿里云 text-embedding-v2 已确认完全兼容
+   OpenAI 响应格式（{"data": [{"embedding": [...], ...}]}）。
+2. `dashscope`：保留旧的手写 requests 实现，作为非 OpenAI 兼容 API
+   的回退模板（如 Cohere、Jina、本地 bge 服务），改造时照着改请求
+   URL / body / 响应解析三处即可。
 """
 
 from __future__ import annotations
@@ -18,10 +25,14 @@ logger = logging.getLogger(__name__)
 
 
 class DashScopeEmbeddings(Embeddings):
-    """兼容阿里云 DashScope embedding API 的包装器
+    """非 OpenAI 兼容 API 的回退模板（原阿里云 DashScope 实现）
 
-    继承 LangChain Embeddings 接口，确保类型兼容性。
-    失败时抛出异常，便于上层处理。
+    保留这个类是为了：
+    - 当 embedding.provider=dashscope 时走这个手写实现
+    - 给非 OpenAI 兼容 API（Cohere/Jina/bge 等）提供改造模板：
+      改请求 URL、body 格式、响应解析三处即可适配
+
+    阿里云百炼现已原生兼容 OpenAI 格式，建议用 provider=openai。
     """
 
     def __init__(
@@ -67,7 +78,7 @@ class DashScopeEmbeddings(Embeddings):
         return result[0]
 
     def _embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """调用阿里云 API 嵌入一批文本
+        """调用 API 嵌入一批文本
 
         Raises:
             RuntimeError: 当 API 调用失败时抛出
@@ -113,3 +124,48 @@ class DashScopeEmbeddings(Embeddings):
     async def aembed_query(self, text: str) -> List[float]:
         """异步嵌入单个查询文本"""
         return self.embed_query(text)
+
+
+def create_embedding_fn(
+    model: str,
+    api_key: str,
+    api_base: str,
+    provider: str = "openai",
+) -> Embeddings:
+    """工厂函数：按 provider 创建 Embedding 实例
+
+    Args:
+        model: 模型名（如 text-embedding-v2）
+        api_key: API Key
+        api_base: API 基础 URL
+        provider: "openai"（默认，走 langchain_openai）或 "dashscope"（手写回退）
+
+    Returns:
+        LangChain Embeddings 实例
+    """
+    if provider == "dashscope":
+        logger.info(f"使用 DashScope 手写 embedding: model={model}")
+        return DashScopeEmbeddings(
+            model=model,
+            api_key=api_key,
+            api_base=api_base,
+        )
+
+    # 默认走 OpenAI 兼容路径
+    try:
+        from langchain_openai import OpenAIEmbeddings
+        logger.info(f"使用 OpenAIEmbeddings: model={model}, base={api_base}")
+        return OpenAIEmbeddings(
+            model=model,
+            api_key=api_key,
+            base_url=api_base,
+        )
+    except Exception as e:
+        logger.warning(
+            f"OpenAIEmbeddings 初始化失败 ({e})，回退到 DashScope 手写实现"
+        )
+        return DashScopeEmbeddings(
+            model=model,
+            api_key=api_key,
+            api_base=api_base,
+        )

@@ -16,6 +16,9 @@ llm:
 
 # Embedding 配置（阿里云通义千问 Embedding）
 embedding:
+  # provider: dashscope（默认，手写 requests，兼容阿里云百炼 input 格式）
+  #           openai（走 langchain_openai，仅用于严格兼容 OpenAI tokenizer 的 API）
+  provider: "${EMBEDDING_PROVIDER:dashscope}"
   model: "${EMBEDDING_MODEL:text-embedding-v2}"
   api_key: "${DASHSCOPE_API_KEY}"
   api_base: "${LLM_API_BASE:https://dashscope.aliyuncs.com/compatible-mode/v1}"

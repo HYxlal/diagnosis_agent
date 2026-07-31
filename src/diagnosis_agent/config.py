@@ -31,6 +31,9 @@ class EmbeddingConfig(BaseModel):
     model: str = "text-embedding-v2"
     api_key: str = ""
     api_base: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # dashscope（默认，手写 requests，兼容阿里云百炼 input 格式）
+    # openai（走 langchain_openai，仅用于严格兼容 OpenAI tokenizer 的 API）
+    provider: str = "dashscope"
 
 
 class VectorStoreConfig(BaseModel):

@@ -72,7 +72,12 @@ def create_embedding(
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
 ):
-    """创建 Embedding 实例"""
+    """创建 Embedding 实例
+
+    默认走 langchain_openai.OpenAIEmbeddings（适用于所有 OpenAI 兼容 API，
+    如阿里云百炼、DeepSeek、本地 vLLM）；
+    embedding.provider=dashscope 时走 DashScopeEmbeddings 手写实现。
+    """
     settings = get_settings()
 
     emb_model = model or settings.embedding.model
@@ -81,10 +86,10 @@ def create_embedding(
 
     logger.info(f"创建 Embedding: model={emb_model}")
 
-    # 使用自定义的 DashScopeEmbeddings 包装器，兼容阿里云 API
-    from .embedding_wrapper import DashScopeEmbeddings
-    return DashScopeEmbeddings(
+    from .embedding_wrapper import create_embedding_fn
+    return create_embedding_fn(
         model=emb_model,
         api_key=emb_api_key,
         api_base=emb_api_base,
+        provider=settings.embedding.provider,
     )

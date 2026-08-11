@@ -137,22 +137,30 @@ def build_no_similar_case_prompt(
 注意：即使没有相似工况，你仍然需要先调用 search_similar_incidents 确认检索结果，再给出 Final Answer。"""
 
 
-def format_similar_cases_for_prompt(cases: list[dict]) -> str:
-    """将相似工单列表格式化为 prompt 文本"""
+def format_similar_cases_for_prompt(cases: list) -> str:
+    """将相似工单 Document 列表格式化为 prompt 文本
+
+    Args:
+        cases: LangChain Document 列表，metadata 包含 id/problem_description/similarity 等
+    """
     if not cases:
         return "（未检索到相似工单）"
 
     lines = []
-    for i, case in enumerate(cases, 1):
-        lines.append(f"**工单 {i}** (ID: {case.get('record_id', 'N/A')}, 相似度: {case.get('similarity', 0):.2f})")
-        lines.append(f"  - 问题描述: {case.get('problem_description', 'N/A')}")
-        lines.append(f"  - 根本原因: {case.get('root_cause', 'N/A')}")
-        lines.append(f"  - 对策: {case.get('countermeasure', 'N/A')}")
-        lines.append(f"  - 驱动代码: {case.get('drive_code', 'N/A')}")
-        lines.append(f"  - 车型: {case.get('vehicle_type', 'N/A')}")
-        lines.append(f"  - 仪表盘指示: {case.get('dashboard_indicator', 'N/A')}")
-        lines.append(f"  - DTC码: {case.get('dtc_code', 'N/A')}")
-        lines.append(f"  - 故障场景: {case.get('fault_scenario', 'N/A')}")
+    for i, doc in enumerate(cases, 1):
+        meta = doc.metadata
+        lines.append(
+            f"**工单 {i}** (ID: {meta.get('id', 'N/A')}, "
+            f"相似度: {meta.get('score', 0):.2f})"
+        )
+        lines.append(f"  - 问题描述: {meta.get('problem_description', 'N/A')}")
+        lines.append(f"  - 根本原因: {meta.get('root_cause', 'N/A')}")
+        lines.append(f"  - 对策: {meta.get('countermeasure', 'N/A')}")
+        lines.append(f"  - 驱动代码: {meta.get('drive_code', 'N/A')}")
+        lines.append(f"  - 车型: {meta.get('vehicle_type', 'N/A')}")
+        lines.append(f"  - 仪表盘指示: {meta.get('dashboard_indicator', 'N/A')}")
+        lines.append(f"  - DTC码: {meta.get('dtc_code', 'N/A')}")
+        lines.append(f"  - 故障场景: {meta.get('fault_scenario', 'N/A')}")
         lines.append("")
 
     return "\n".join(lines)

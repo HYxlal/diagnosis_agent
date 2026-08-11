@@ -136,12 +136,12 @@ def create_chroma_retriever() -> ChromaVectorRetriever:
     if cache_key in _store_cache:
         store = _store_cache[cache_key]
     else:
+        from ..utils.llm_factory import create_embedding
+        embedding = create_embedding()
         store = ChromaVectorStore(
             persist_dir=persist_dir,
             collection_name=collection_name,
-            embedding_model=settings.embedding.model,
-            api_key=settings.embedding.api_key or None,
-            api_base=settings.embedding.api_base or None,
+            embedding=embedding,
         )
         _store_cache[cache_key] = store
 

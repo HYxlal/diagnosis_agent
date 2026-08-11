@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from langchain.agents import create_agent
+from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from ..config import Settings
@@ -108,10 +109,16 @@ class LangChainDiagnosticAgent:
     def diagnose_with_standard_input(
         self,
         standard_input: StandardInput,
+        session_context: str = "",
     ) -> StandardOutput:
         """使用标准输入接口执行诊断
 
         这是对外暴露的主入口方法，接收平台 Agent 传入的标准 JSON。
+
+        Args:
+            standard_input: 平台 Agent 传入的标准输入
+            session_context: 多轮会话上下文文本（由 SessionManager 构建），
+                           空字符串表示首轮对话
 
         流程：
         1. 验证输入
@@ -155,7 +162,7 @@ class LangChainDiagnosticAgent:
                     standard_input=standard_input,
                 )
 
-            diagnostic_output = self.diagnose(parsed_input)
+            diagnostic_output = self.diagnose(parsed_input, session_context=session_context)
         except Exception as e:
             logger.error(f"诊断执行失败: {e}")
             return build_error_output(
@@ -179,7 +186,7 @@ class LangChainDiagnosticAgent:
                 standard_input=standard_input,
             )
 
-    def diagnose(self, parsed_input: ParsedInput) -> DiagnosticOutput:
+    def diagnose(self, parsed_input: ParsedInput, session_context: str = "") -> DiagnosticOutput:
         """执行完整诊断流程（内部方法）
 
         主流程编排：
@@ -188,6 +195,10 @@ class LangChainDiagnosticAgent:
         3. 其他意图（指令/补充）：跳过预检索，直接进 Agent
         4. 运行 LangChain Agent → 提取工具调用 / ReAct 步骤 / 推理结果
         5. 组装双层输出：DiagnosticReport（人读）+ DatabaseEntry（机读）
+
+        Args:
+            parsed_input: 解析后的输入
+            session_context: 多轮会话上下文，空字符串表示首轮对话
         """
         description = parsed_input.description or ""
 
@@ -220,26 +231,27 @@ class LangChainDiagnosticAgent:
             description=description,
             similar_cases=similar_cases,
             has_similar=has_similar,
+            session_context=session_context,
         )
 
         findings = self._build_findings(reasoning_result, similar_cases)
 
-        # 将检索到的 dict 结果转为 SimilarCase 模型，供报告展示
+        # 将检索到的 Document 转为 SimilarCase 模型，供报告展示
         similar_case_models = [
             SimilarCase(
-                record_id=c.get("record_id", ""),
-                problem_description=c.get("problem_description", ""),
-                root_cause=c.get("root_cause", ""),
-                countermeasure=c.get("countermeasure", ""),
-                drive_code=c.get("drive_code", ""),
-                vehicle_type=c.get("vehicle_type", ""),
-                dashboard_indicator=c.get("dashboard_indicator", ""),
-                dtc_code=c.get("dtc_code", ""),
-                fault_scenario=c.get("fault_scenario", ""),
-                similarity=c.get("similarity", 0.0),
-                source=c.get("source", "unknown"),
+                record_id=doc.metadata.get("id", ""),
+                problem_description=doc.metadata.get("problem_description", ""),
+                root_cause=doc.metadata.get("root_cause", ""),
+                countermeasure=doc.metadata.get("countermeasure", ""),
+                drive_code=doc.metadata.get("drive_code", ""),
+                vehicle_type=doc.metadata.get("vehicle_type", ""),
+                dashboard_indicator=doc.metadata.get("dashboard_indicator", ""),
+                dtc_code=doc.metadata.get("dtc_code", ""),
+                fault_scenario=doc.metadata.get("fault_scenario", ""),
+                similarity=doc.metadata.get("score", 0.0),
+                source=doc.metadata.get("source", "unknown"),
             )
-            for c in similar_cases
+            for doc in similar_cases
         ]
 
         tools_used = list(set(tc.tool_name for tc in tool_calls))
@@ -274,7 +286,7 @@ class LangChainDiagnosticAgent:
             countermeasure_text=countermeasure_text,
             confidence=reasoning_result.get("confidence", 0.3),
             based_on_similar=has_similar,
-            similar_record_ids=[c.get("record_id", "") for c in similar_cases],
+            similar_record_ids=[doc.metadata.get("id", "") for doc in similar_cases],
         )
 
         diagnostic_output = DiagnosticOutput(
@@ -343,8 +355,9 @@ class LangChainDiagnosticAgent:
     def _run_agent(
         self,
         description: str,
-        similar_cases: list[dict],
+        similar_cases: list[Document],
         has_similar: bool,
+        session_context: str = "",
     ) -> tuple[dict, list[ToolCallRecord], list[ReActStep]]:
         """使用缓存的 Agent 执行循环"""
         if has_similar:
@@ -352,6 +365,10 @@ class LangChainDiagnosticAgent:
             user_prompt = build_similar_case_prompt(description=description, similar_cases_text=cases_text)
         else:
             user_prompt = build_no_similar_case_prompt(description=description)
+
+        # 多轮会话上下文注入
+        if session_context:
+            user_prompt = f"{session_context}\n\n{user_prompt}"
 
         logger.info("开始 Agent 循环")
         try:
@@ -557,7 +574,7 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
         return steps
 
     def _parse_final_result(self, last_message) -> dict:
-        """解析最终结果，使用 Pydantic 模型验证"""
+        """解析最终结果，使用 PydanticOutputParser 验证"""
         if not last_message:
             return self._get_default_result()
 
@@ -571,8 +588,10 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
                 if data is None:
                     return self._get_default_result()
 
-            result = DiagnosticResult(**data)
-            return result.dict()
+            from langchain_core.output_parsers import PydanticOutputParser
+            parser = PydanticOutputParser(pydantic_object=DiagnosticResult)
+            result = parser.parse(json.dumps(data, ensure_ascii=False))
+            return result.dict() if isinstance(result, DiagnosticResult) else result
 
         except (json.JSONDecodeError, TypeError, ValueError) as e:
             logger.error(f"解析最终结果失败: {e}")
@@ -632,28 +651,15 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
             "findings": [],
         }
 
-    def _retrieve_similar_cases(self, parsed_input: ParsedInput) -> list[dict]:
+    def _retrieve_similar_cases(self, parsed_input: ParsedInput) -> list[Document]:
         """使用 HybridRetriever 检索相似工况（两段式）
 
-        HybridRetriever 内部按 strategy 配置编排：
-        - chroma_only : 只走 Chroma 语义检索
-        - neo4j_first: Neo4j 召回 → Embedding 精排 → Chroma 兜底
-        - hybrid     : 两段式全开
-        返回的每条 Document 在 metadata 里带 source 标签（"neo4j"/"chroma"）。
+        返回 LangChain Document 列表，保留结构化元数据（id/score/source），
+        调用方需要 IncidentRecord 时通过 document_to_record() 转换。
         """
         try:
             docs = self._retriever.retrieve_parsed(parsed_input)
-
-            cases: list[dict] = []
-            for doc in docs:
-                record = document_to_record(doc)
-                record_dict = record.to_dict()
-                record_dict["record_id"] = doc.metadata.get("id", "")
-                record_dict["similarity"] = doc.metadata.get("score", 0.0)
-                record_dict["source"] = doc.metadata.get("source", "unknown")
-                cases.append(record_dict)
-
-            return cases
+            return docs
         except Exception as e:
             logger.warning(f"检索失败: {e}")
             return []
@@ -661,7 +667,7 @@ confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定�
     def _build_findings(
         self,
         reasoning_result: dict,
-        similar_cases: list[dict],
+        similar_cases: list[Document],
     ) -> list[DiagnosticFinding]:
         """从推理结果构建诊断发现"""
         findings: list[DiagnosticFinding] = []

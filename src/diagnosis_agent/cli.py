@@ -103,12 +103,11 @@ def _print_model_status(settings: Settings) -> None:
 
 def _build_components(settings: Settings):
     """构建存储"""
+    from .utils.llm_factory import create_embedding
     store = ChromaVectorStore(
         persist_dir=settings.vector_store.persist_dir,
         collection_name=settings.vector_store.collection_name,
-        embedding_model=settings.embedding.model,
-        api_key=settings.embedding.api_key or None,
-        api_base=settings.embedding.api_base or None,
+        embedding=create_embedding(),
     )
     return store, settings
 
@@ -222,18 +221,35 @@ def _run_standard_diagnosis(
 ) -> dict:
     """执行标准接口诊断并输出/保存结果
 
-    流程：构造 Agent → diagnose_with_standard_input → 控制台输出 + 保存 JSON。
+    流程：构造 Agent → SessionManager 构建上下文 → diagnose_with_standard_input
+          → 控制台输出 + 保存 JSON + 显示会话状态。
     错误状态（code != 0）只输出 code + msg，不输出 diagnosis_result。
     """
+    from .agent.session_manager import SessionManager
+    session_manager = SessionManager()
+    session_id = standard_input.session_id or ""
+
+    # 构建多轮上下文
+    session_context = session_manager.get_context(session_id)
+    if session_context:
+        console.print(f"  [dim]会话 {session_id}: 第 {session_manager.get_round_count(session_id)} 轮历史已注入[/dim]")
+
     settings = get_settings()
 
     try:
         agent = LangChainDiagnosticAgent(settings=settings)
-        standard_output = agent.diagnose_with_standard_input(standard_input)
+        standard_output = agent.diagnose_with_standard_input(
+            standard_input, session_context=session_context,
+        )
     except Exception as e:
         error_output = {"code": -2, "msg": f"Agent输出异常: {e}"}
         console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
         raise typer.Exit(1)
+
+    # 存储本轮对话（成功时）
+    if standard_output.code == 0 and session_id:
+        answer = session_manager._format_answer_for_context(standard_output)
+        session_manager.update(session_id, standard_input.raw_query, answer)
 
     if standard_output.code == 0:
         console.print(Panel.fit("✅ 诊断完成", style="bold green"))
@@ -245,6 +261,11 @@ def _run_standard_diagnosis(
             console.print(f"  诊断置信度: {standard_output.diagnosis_confidence:.0%}")
             console.print(f"  根因数量: {len(result.fault_root_cause)}")
             console.print(f"  解决方案数量: {len(result.solution)}")
+
+        # 会话状态（独立于 StandardOutput）
+        if session_id:
+            round_count = session_manager.get_round_count(session_id)
+            console.print(f"  会话: {session_id} | 第 {round_count} 轮")
 
         console.print()
         console.print("  📄 标准输出JSON:")

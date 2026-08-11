@@ -24,7 +24,10 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from typing import Any
+
 from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
 
 from ..config import Settings, get_settings
 from ..models.input import ParsedInput
@@ -38,10 +41,14 @@ from .search_condition import SearchCondition
 logger = logging.getLogger(__name__)
 
 
-class HybridRetriever(FaultRetriever):
+class HybridRetriever(FaultRetriever, BaseRetriever):
     """两段式混合检索器
 
-    Neo4j 召回 → Embedding 精排 → Chroma 兜底（按 strategy 配置）
+    同时继承 FaultRetriever（内部接口）和 BaseRetriever（LangChain 标准接口）。
+    Neo4j 召回 → Embedding 精排 → Chroma 兜底（按 strategy 配置）。
+
+    - retrieve_parsed()：两段式检索入口（Agent 内部使用，需要 ParsedInput）
+    - _get_relevant_documents()：BaseRetriever 接口，纯语义检索
     """
 
     def __init__(
@@ -54,6 +61,7 @@ class HybridRetriever(FaultRetriever):
         fallback_to_chroma: bool = True,
         strategy: str = "neo4j_first",
     ):
+        super().__init__()
         self._neo4j = neo4j_retriever
         self._chroma = chroma_retriever
         self._reranker = reranker
@@ -114,6 +122,17 @@ class HybridRetriever(FaultRetriever):
         供外部按统一接口调用时用，不参与两段式编排。
         """
         return self.semantic_search(query=query, top_k=top_k)
+
+    def _get_relevant_documents(
+        self, query: str, *, run_manager: Any = None, **kwargs: Any,
+    ) -> list[Document]:
+        """BaseRetriever 接口：纯语义检索
+
+        让 HybridRetriever 可被 create_retriever_tool 包装。
+        由于只接受 query 字符串，无法传递结构化字段，因此走纯 Chroma 语义检索。
+        两段式检索仍通过 retrieve_parsed() 使用。
+        """
+        return self._chroma.invoke(query)[:self._top_k]
 
     def retrieve_parsed(self, parsed_input: ParsedInput) -> list[Document]:
         """按 ParsedInput 执行两段式检索（编排入口）

@@ -35,19 +35,23 @@ class TestPrompts:
         assert "ReAct" in prompt
 
     def test_similar_case_prompt(self):
+        from langchain_core.documents import Document
         cases = [
-            {
-                "record_id": "REC-001",
-                "problem_description": "发动机故障灯亮",
-                "root_cause": "传感器故障",
-                "countermeasure": "更换传感器",
-                "drive_code": "DRV-001",
-                "vehicle_type": "SUV-X1",
-                "dashboard_indicator": "发动机故障灯",
-                "dtc_code": "P0107",
-                "fault_scenario": "冷启动",
-                "similarity": 0.85,
-            }
+            Document(
+                page_content="发动机故障灯亮",
+                metadata={
+                    "id": "REC-001",
+                    "problem_description": "发动机故障灯亮",
+                    "root_cause": "传感器故障",
+                    "countermeasure": "更换传感器",
+                    "drive_code": "DRV-001",
+                    "vehicle_type": "SUV-X1",
+                    "dashboard_indicator": "发动机故障灯",
+                    "dtc_code": "P0107",
+                    "fault_scenario": "冷启动",
+                    "score": 0.85,
+                },
+            )
         ]
         text = format_similar_cases_for_prompt(cases)
         assert "REC-001" in text

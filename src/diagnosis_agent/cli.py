@@ -639,7 +639,8 @@ def config():
 
 @app.command()
 def chat(
-    mcuid: str = typer.Option(..., "--mcuid", "-m", help="MCU 标识（必填，用于精确搜索）"),
+    initial_question: Optional[str] = typer.Argument(None, help="初始问题（可选，不传则交互式输入）"),
+    mcuid: str = typer.Option("CLI", "--mcuid", "-m", help="MCU 标识（可选，默认 CLI）"),
     session_id: Optional[str] = typer.Option(None, "--session", "-s", help="会话ID（可选，不填自动生成）"),
     output_dir: str = typer.Option("output", "--output", "-o", help="报告输出目录"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
@@ -653,8 +654,10 @@ def chat(
       下次用 --session 指定同一 id 还能恢复。
 
     用法示例：
-        python -m diagnosis_agent.cli chat --mcuid MCU_001
-        python -m diagnosis_agent.cli chat --mcuid MCU_001 --session my-session
+        python -m diagnosis_agent.cli chat                                           # 交互模式
+        python -m diagnosis_agent.cli chat "发动机有异响"                            # 单次提问
+        python -m diagnosis_agent.cli chat --mcuid MCU_001                           # 指定 MCU
+        python -m diagnosis_agent.cli chat --mcuid MCU_001 --session my-session      # 指定会话
 
     输入 exit / quit / q 退出，Ctrl+C 也退出。
     """
@@ -676,6 +679,33 @@ def chat(
     console.print()
 
     round_num = sm.get_round_count(sess_id) + 1
+
+    # 如果传了初始问题，先处理这一轮
+    if initial_question:
+        standard_input = StandardInput(
+            raw_query=initial_question,
+            mcuid=mcuid,
+            session_id=sess_id,
+            entities=StandardEntities(),
+        )
+        history_messages = sm.get_context(sess_id)
+        standard_output = agent.diagnose_with_standard_input(
+            standard_input, history_messages=history_messages,
+        )
+        if standard_output.code == 0:
+            from langchain_core.messages import messages_to_dict
+            current_messages = messages_to_dict(getattr(agent, "_last_messages", []))
+            sm.update(sess_id, initial_question, current_messages)
+            result = standard_output.diagnosis_result
+            if result:
+                console.print(f"  [cyan]分类:[/cyan] {result.classification}")
+                console.print(f"  [cyan]根因:[/cyan] {result.fault_root_cause[0] if result.fault_root_cause else 'N/A'}")
+                console.print(f"  [cyan]方案:[/cyan] {result.solution[0] if result.solution else 'N/A'}")
+                console.print(f"  [cyan]置信度:[/cyan] {standard_output.diagnosis_confidence:.0%}")
+                console.print()
+        else:
+            console.print(f"  [red]诊断失败: {standard_output.msg}[/red]")
+        round_num += 1
 
     while True:
         try:

@@ -230,9 +230,9 @@ def _run_standard_diagnosis(
     session_manager = SessionManager()
     session_id = standard_input.session_id or ""
 
-    # 构建多轮上下文
-    session_context = session_manager.get_context(session_id)
-    if session_context:
+    # 构建多轮上下文（消息列表）
+    history_messages = session_manager.get_context(session_id)
+    if history_messages:
         console.print(f"  [dim]会话 {session_id}: 第 {session_manager.get_round_count(session_id)} 轮历史已注入[/dim]")
 
     settings = get_settings()
@@ -240,17 +240,18 @@ def _run_standard_diagnosis(
     try:
         agent = LangChainDiagnosticAgent(settings=settings)
         standard_output = agent.diagnose_with_standard_input(
-            standard_input, session_context=session_context,
+            standard_input, history_messages=history_messages,
         )
     except Exception as e:
         error_output = {"code": -2, "msg": f"Agent输出异常: {e}"}
         console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
         raise typer.Exit(1)
 
-    # 存储本轮对话（成功时）
+    # 存储本轮完整消息列表（成功时）
     if standard_output.code == 0 and session_id:
-        answer = session_manager._format_answer_for_context(standard_output)
-        session_manager.update(session_id, standard_input.raw_query, answer)
+        from langchain_core.messages import messages_to_dict
+        current_messages = messages_to_dict(getattr(agent, "_last_messages", []))
+        session_manager.update(session_id, standard_input.raw_query, current_messages)
 
     if standard_output.code == 0:
         console.print(Panel.fit("✅ 诊断完成", style="bold green"))
@@ -645,6 +646,12 @@ def chat(
 ):
     """交互式多轮诊断 — 进程常驻，持续接收问题，支持多轮追问
 
+    为什么需要这个命令？
+    - diagnose 命令是"一次性"的，进程退出后 SessionManager 内存状态就丢了。
+    - chat 命令让进程常驻，同一 session_id 在内存中连续维护，多轮最自然。
+    - 即使退出，SessionManager 也默认把历史持久化到 data/sessions/{session_id}.json，
+      下次用 --session 指定同一 id 还能恢复。
+
     用法示例：
         python -m diagnosis_agent.cli chat --mcuid MCU_001
         python -m diagnosis_agent.cli chat --mcuid MCU_001 --session my-session
@@ -691,16 +698,18 @@ def chat(
             entities=StandardEntities(),
         )
 
-        context = sm.get_context(sess_id)
-        if context:
+        history_messages = sm.get_context(sess_id)
+        if history_messages:
             console.print(f"  [dim]已注入 {sm.get_round_count(sess_id)} 轮历史[/dim]")
 
         standard_output = agent.diagnose_with_standard_input(
-            standard_input, session_context=context,
+            standard_input, history_messages=history_messages,
         )
 
         if standard_output.code == 0:
-            sm.update(sess_id, user_input, sm._format_answer_for_context(standard_output))
+            from langchain_core.messages import messages_to_dict
+            current_messages = messages_to_dict(getattr(agent, "_last_messages", []))
+            sm.update(sess_id, user_input, current_messages)
             result = standard_output.diagnosis_result
             if result:
                 console.print(f"  [cyan]分类:[/cyan] {result.classification}")

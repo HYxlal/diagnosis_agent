@@ -17,7 +17,14 @@ from typing import Any, Optional
 
 from langchain.agents import create_agent
 from langchain_core.documents import Document
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    ToolMessage,
+    messages_from_dict,
+    messages_to_dict,
+)
 
 from ..config import Settings
 from ..models.converter import (
@@ -109,22 +116,21 @@ class LangChainDiagnosticAgent:
     def diagnose_with_standard_input(
         self,
         standard_input: StandardInput,
-        session_context: str = "",
+        history_messages: list[dict] | None = None,
     ) -> StandardOutput:
         """使用标准输入接口执行诊断
 
-        这是对外暴露的主入口方法，接收平台 Agent 传入的标准 JSON。
-
         Args:
             standard_input: 平台 Agent 传入的标准输入
-            session_context: 多轮会话上下文文本（由 SessionManager 构建），
-                           空字符串表示首轮对话
+            history_messages: 历史消息列表（来自 SessionManager.get_context()），
+                             None 或空列表表示首轮对话。
+                             dict 格式与 LangChain messages_to_dict 一致。
 
-        流程：
-        1. 验证输入
-        2. 转换为内部 ParsedInput
-        3. 调用内部 diagnose 方法
-        4. 转换为标准输出
+        为什么需要 history_messages？
+        - LangChain Agent 是无状态的，每次 invoke() 只根据当前 messages 推理。
+        - 多轮时，需要把上一轮的完整消息列表（HumanMessage + AIMessage + ToolMessage）
+          直接拼入本次 invoke 的 messages 列表，Agent 才能看到之前做了什么。
+        - 不使用文本摘要，因为文本摘要会丢失工具调用结果等关键信息。
         """
         # 1. 验证输入
         validation_error = validate_standard_input(standard_input)
@@ -162,7 +168,8 @@ class LangChainDiagnosticAgent:
                     standard_input=standard_input,
                 )
 
-            diagnostic_output = self.diagnose(parsed_input, session_context=session_context)
+            # 把 history_messages 透传给内部 diagnose，最终拼入 Agent invoke 的 messages
+            diagnostic_output = self.diagnose(parsed_input, history_messages=history_messages)
         except Exception as e:
             logger.error(f"诊断执行失败: {e}")
             return build_error_output(
@@ -186,7 +193,7 @@ class LangChainDiagnosticAgent:
                 standard_input=standard_input,
             )
 
-    def diagnose(self, parsed_input: ParsedInput, session_context: str = "") -> DiagnosticOutput:
+    def diagnose(self, parsed_input: ParsedInput, history_messages: list[dict] | None = None) -> DiagnosticOutput:
         """执行完整诊断流程（内部方法）
 
         主流程编排：
@@ -198,7 +205,7 @@ class LangChainDiagnosticAgent:
 
         Args:
             parsed_input: 解析后的输入
-            session_context: 多轮会话上下文，空字符串表示首轮对话
+            history_messages: 历史消息列表，None 或空列表表示首轮对话
         """
         description = parsed_input.description or ""
 
@@ -231,7 +238,7 @@ class LangChainDiagnosticAgent:
             description=description,
             similar_cases=similar_cases,
             has_similar=has_similar,
-            session_context=session_context,
+            history_messages=history_messages,
         )
 
         findings = self._build_findings(reasoning_result, similar_cases)
@@ -357,32 +364,42 @@ class LangChainDiagnosticAgent:
         description: str,
         similar_cases: list[Document],
         has_similar: bool,
-        session_context: str = "",
+        history_messages: list[dict] | None = None,
     ) -> tuple[dict, list[ToolCallRecord], list[ReActStep]]:
-        """使用缓存的 Agent 执行循环"""
+        """使用缓存的 Agent 执行循环
+
+        Args:
+            history_messages: 历史消息列表（来自 SessionManager.get_context()）。
+                             dict 格式与 LangChain messages_to_dict 一致。
+                             Agent 能看到之前每一轮的工具调用结果。
+        """
         if has_similar:
             cases_text = format_similar_cases_for_prompt(similar_cases)
             user_prompt = build_similar_case_prompt(description=description, similar_cases_text=cases_text)
         else:
             user_prompt = build_no_similar_case_prompt(description=description)
 
-        # 多轮会话上下文注入
-        if session_context:
-            user_prompt = f"{session_context}\n\n{user_prompt}"
+        # 多轮历史消息注入：
+        # LangChain create_agent 是无状态的，不会自动记住上一轮对话。
+        # 这里把历史消息列表（HumanMessage + AIMessage + ToolMessage）直接拼入
+        # invoke 的 messages 列表，Agent 能看到之前每一轮的工具调用和返回结果。
+        invoke_messages: list = []
+        if history_messages:
+            invoke_messages.extend(messages_from_dict(history_messages))
+        invoke_messages.append({"role": "user", "content": user_prompt})
 
         logger.info("开始 Agent 循环")
         try:
-            result = self._agent.invoke({
-                "messages": [
-                    {"role": "user", "content": user_prompt}
-                ]
-            })
+            result = self._agent.invoke({"messages": invoke_messages})
         except Exception as e:
             logger.error(f"Agent 执行失败: {e}")
             return {}, [], []
 
         messages = result.get("messages", [])
         last_message = messages[-1] if messages else None
+
+        # 保存当前轮完整消息，供 SessionManager 存储
+        self._last_messages = messages
 
         tool_calls = self._extract_tool_calls(messages)
         react_steps = self._extract_react_steps(messages)

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import uuid
 from pathlib import Path
 from typing import List, Optional
 
@@ -633,6 +634,84 @@ def config():
     rt_table.add_row("工具 filter_top_k", str(settings.tools.filter_top_k))
 
     console.print(rt_table)
+
+
+@app.command()
+def chat(
+    mcuid: str = typer.Option(..., "--mcuid", "-m", help="MCU 标识（必填，用于精确搜索）"),
+    session_id: Optional[str] = typer.Option(None, "--session", "-s", help="会话ID（可选，不填自动生成）"),
+    output_dir: str = typer.Option("output", "--output", "-o", help="报告输出目录"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
+):
+    """交互式多轮诊断 — 进程常驻，持续接收问题，支持多轮追问
+
+    用法示例：
+        python -m diagnosis_agent.cli chat --mcuid MCU_001
+        python -m diagnosis_agent.cli chat --mcuid MCU_001 --session my-session
+
+    输入 exit / quit / q 退出，Ctrl+C 也退出。
+    """
+    _setup_logging(verbose)
+    reset_settings()
+    settings = get_settings()
+    from .agent.session_manager import SessionManager
+    from .agent.langchain_agent import LangChainDiagnosticAgent
+
+    console.print(Panel.fit("🔍 故障诊断 Agent — 交互模式", style="bold blue"))
+    _print_model_status(settings)
+
+    sess_id = session_id or f"chat-{uuid.uuid4().hex[:8]}"
+    agent = LangChainDiagnosticAgent(settings=settings)
+    sm = SessionManager()
+
+    console.print(f"  MCU: [cyan]{mcuid}[/cyan]")
+    console.print(f"  会话: [dim]{sess_id}[/dim] (输入 exit/quit/q 退出)")
+    console.print()
+
+    round_num = sm.get_round_count(sess_id) + 1
+
+    while True:
+        try:
+            user_input = console.input(f"[bold green]第{round_num}轮[/bold green] > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[dim]已退出交互模式[/dim]")
+            break
+
+        if not user_input:
+            continue
+        if user_input.lower() in ("exit", "quit", "q"):
+            console.print(f"[dim]已退出，会话 {sess_id} 共 {round_num - 1} 轮[/dim]")
+            break
+
+        # 构建标准输入
+        standard_input = StandardInput(
+            raw_query=user_input,
+            mcuid=mcuid,
+            session_id=sess_id,
+            entities=StandardEntities(),
+        )
+
+        context = sm.get_context(sess_id)
+        if context:
+            console.print(f"  [dim]已注入 {sm.get_round_count(sess_id)} 轮历史[/dim]")
+
+        standard_output = agent.diagnose_with_standard_input(
+            standard_input, session_context=context,
+        )
+
+        if standard_output.code == 0:
+            sm.update(sess_id, user_input, sm._format_answer_for_context(standard_output))
+            result = standard_output.diagnosis_result
+            if result:
+                console.print(f"  [cyan]分类:[/cyan] {result.classification}")
+                console.print(f"  [cyan]根因:[/cyan] {result.fault_root_cause[0] if result.fault_root_cause else 'N/A'}")
+                console.print(f"  [cyan]方案:[/cyan] {result.solution[0] if result.solution else 'N/A'}")
+                console.print(f"  [cyan]置信度:[/cyan] {standard_output.diagnosis_confidence:.0%}")
+                console.print()
+        else:
+            console.print(f"  [red]诊断失败: {standard_output.msg}[/red]")
+
+        round_num += 1
 
 
 def main():

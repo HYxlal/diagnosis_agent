@@ -35,3 +35,4 @@ build_patch_script.py
 build_patch_v031.py
 deploy_v030_to_v031.zip
 README_DEPLOY.txt
+data/sessions/

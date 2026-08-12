@@ -65,6 +65,7 @@ from .prompts import (
     build_no_similar_case_prompt,
     format_similar_cases_for_prompt,
 )
+from .context_manager import SimpleContextManager
 from .tools import DiagnosticTools
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,10 @@ class LangChainDiagnosticAgent:
             settings=settings,
         )
         self._agent = self._build_agent()
+        self._context_manager = SimpleContextManager(
+            window_size=settings.context.window_size,
+            max_tokens=settings.context.max_tokens,
+        )
         self._last_diagnostic_output: Optional[DiagnosticOutput] = None
 
     def _build_agent(self):
@@ -388,6 +393,10 @@ class LangChainDiagnosticAgent:
             invoke_messages.extend(messages_from_dict(history_messages))
         invoke_messages.append({"role": "user", "content": user_prompt})
 
+        # Token 预算裁剪：在 LLM 调用前按 window_size 和 max_tokens 裁剪消息
+        prepare_result = self._context_manager.prepare(invoke_messages)
+        invoke_messages = prepare_result.messages
+
         logger.info("开始 Agent 循环")
         try:
             result = self._agent.invoke({"messages": invoke_messages})
@@ -398,8 +407,10 @@ class LangChainDiagnosticAgent:
         messages = result.get("messages", [])
         last_message = messages[-1] if messages else None
 
-        # 保存当前轮完整消息，供 SessionManager 存储
-        self._last_messages = messages
+        # 只保存当前轮新增消息（用户消息 + Agent 产生的 AI/Tool 消息），
+        # 不包含历史。避免轮次间消息重复累积。
+        input_len = len(invoke_messages)
+        self._last_messages = messages[input_len - 1:] if len(messages) >= input_len else messages
 
         tool_calls = self._extract_tool_calls(messages)
         react_steps = self._extract_react_steps(messages)

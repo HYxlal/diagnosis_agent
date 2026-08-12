@@ -118,6 +118,38 @@ class Neo4jConfig(BaseModel):
     fallback_to_chroma: bool = True  # Neo4j 不可用时是否降级到 Chroma
 
 
+class ContextConfig(BaseModel):
+    """上下文管理配置 — 分层记忆（热/温/冷）"""
+
+    # ── Token 预算 ──
+    max_tokens: int = 8000        # 消息列表 token 预算上限
+
+    # ── 热层配置 ──
+    window_size: int = 5          # 热层窗口大小（轮次），保留最近 N 轮完整消息
+
+    # ── 温层配置 ──
+    summary_enabled: bool = False       # 是否启用摘要（Step 1 实现）
+    summary_max_tokens: int = 500       # 摘要最大 token 数
+    summary_strategy: str = "rule"      # 摘要策略: llm | rule | template
+
+    # ── 话题检测配置 ──
+    topic_detection_enabled: bool = False      # 是否启用话题检测（Step 1 实现）
+    topic_detection_strategy: str = "rule"     # 话题检测策略: embedding | llm | hybrid | rule
+    topic_similarity_threshold: float = 0.7    # 话题相似度阈值
+
+    # ── 生命周期配置 ──
+    max_turns: int = 100                   # 最大保留轮次（超过后强制归档）
+    session_idle_timeout: int = 3600       # 会话空闲超时（秒）
+    session_max_lifetime: int = 86400      # 会话最大存活时间（秒）
+
+    # ── 缓存配置 ──
+    cache_context_window: int = 3          # 缓存上下文窗口大小
+
+    # ── 降级配置 ──
+    emergency_min_turns: int = 1           # 紧急截断时保留的最小轮次
+    degradation_logging: bool = True       # 是否启用降级日志
+
+
 class Settings(BaseModel):
     """全局配置根模型"""
 
@@ -132,6 +164,7 @@ class Settings(BaseModel):
     report: ReportConfig = Field(default_factory=ReportConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     neo4j: Neo4jConfig = Field(default_factory=Neo4jConfig)
+    context: ContextConfig = Field(default_factory=ContextConfig)
 
 
 # ---------------------------------------------------------------------------

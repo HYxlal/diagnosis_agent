@@ -83,6 +83,36 @@ paths:
   samples_dir: "data/samples"
   output_dir: "output"
 
+# 上下文管理配置（分层记忆：热/温/冷）
+context:
+  # ── Token 预算 ──
+  max_tokens: 8000     # 消息列表 token 预算上限
+
+  # ── 热层配置 ──
+  window_size: 5       # 热层窗口大小（轮次），保留最近 N 轮完整消息
+
+  # ── 温层配置 ──
+  summary_enabled: false       # 是否启用摘要（Step 1 实现）
+  summary_max_tokens: 500      # 摘要最大 token 数
+  summary_strategy: "rule"     # 摘要策略: llm | rule | template
+
+  # ── 话题检测配置 ──
+  topic_detection_enabled: false      # 是否启用话题检测（Step 1 实现）
+  topic_detection_strategy: "rule"    # 话题检测策略: embedding | llm | hybrid | rule
+  topic_similarity_threshold: 0.7     # 话题相似度阈值
+
+  # ── 生命周期配置 ──
+  max_turns: 100                   # 最大保留轮次（超过后强制归档）
+  session_idle_timeout: 3600       # 会话空闲超时（秒）
+  session_max_lifetime: 86400      # 会话最大存活时间（秒）
+
+  # ── 缓存配置 ──
+  cache_context_window: 3          # 缓存上下文窗口大小
+
+  # ── 降级配置 ──
+  emergency_min_turns: 1           # 紧急截断时保留的最小轮次
+  degradation_logging: true        # 是否启用降级日志
+
 # Neo4j 故障知识图谱配置
 neo4j:
   url: "${NEO4J_URI:bolt://localhost:7687}"

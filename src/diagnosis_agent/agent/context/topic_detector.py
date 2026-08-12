@@ -29,8 +29,8 @@ from .types import ConversationContext, TopicSnapshot
 logger = logging.getLogger(__name__)
 
 # 阶段1：Embedding 相似度阈值
-THRESHOLD_SAME = 0.8       # ≥ 此值 → 同一话题
-THRESHOLD_DIFFERENT = 0.4  # ≤ 此值 → 话题切换
+THRESHOLD_SAME = 0.7       # ≥ 此值 → 同一话题
+THRESHOLD_DIFFERENT = 0.3  # ≤ 此值 → 话题切换
 
 # 阶段2：LLM 精判 Prompt
 # Prompt 已提取到 prompts/topic_detector.py

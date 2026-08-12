@@ -122,6 +122,7 @@ class LangChainDiagnosticAgent:
         self,
         standard_input: StandardInput,
         history_messages: list[dict] | None = None,
+        prepared_messages: list | None = None,
     ) -> StandardOutput:
         """使用标准输入接口执行诊断
 
@@ -173,8 +174,12 @@ class LangChainDiagnosticAgent:
                     standard_input=standard_input,
                 )
 
-            # 把 history_messages 透传给内部 diagnose，最终拼入 Agent invoke 的 messages
-            diagnostic_output = self.diagnose(parsed_input, history_messages=history_messages)
+            # 把 history_messages / prepared_messages 透传给内部 diagnose
+            diagnostic_output = self.diagnose(
+                parsed_input,
+                history_messages=history_messages,
+                prepared_messages=prepared_messages,
+            )
         except Exception as e:
             logger.error(f"诊断执行失败: {e}")
             return build_error_output(
@@ -198,7 +203,12 @@ class LangChainDiagnosticAgent:
                 standard_input=standard_input,
             )
 
-    def diagnose(self, parsed_input: ParsedInput, history_messages: list[dict] | None = None) -> DiagnosticOutput:
+    def diagnose(
+        self,
+        parsed_input: ParsedInput,
+        history_messages: list[dict] | None = None,
+        prepared_messages: list | None = None,
+    ) -> DiagnosticOutput:
         """执行完整诊断流程（内部方法）
 
         主流程编排：
@@ -210,7 +220,9 @@ class LangChainDiagnosticAgent:
 
         Args:
             parsed_input: 解析后的输入
-            history_messages: 历史消息列表，None 或空列表表示首轮对话
+            history_messages: 历史消息列表（dict 格式），None 或空列表表示首轮对话
+            prepared_messages: 预构建的消息列表（BaseMessage 格式），优先级高于 history_messages。
+                              当使用 prepare_from_context() 时传入，跳过 SessionManager 的扁平化历史。
         """
         description = parsed_input.description or ""
 
@@ -244,6 +256,7 @@ class LangChainDiagnosticAgent:
             similar_cases=similar_cases,
             has_similar=has_similar,
             history_messages=history_messages,
+            prepared_messages=prepared_messages,
         )
 
         findings = self._build_findings(reasoning_result, similar_cases)
@@ -370,13 +383,17 @@ class LangChainDiagnosticAgent:
         similar_cases: list[Document],
         has_similar: bool,
         history_messages: list[dict] | None = None,
+        prepared_messages: list | None = None,
     ) -> tuple[dict, list[ToolCallRecord], list[ReActStep]]:
         """使用缓存的 Agent 执行循环
 
         Args:
             history_messages: 历史消息列表（来自 SessionManager.get_context()）。
                              dict 格式与 LangChain messages_to_dict 一致。
-                             Agent 能看到之前每一轮的工具调用结果。
+            prepared_messages: 预构建的消息列表（BaseMessage 格式），
+                             优先级高于 history_messages。
+                             由 ContextManager.prepare_from_context() 生成，
+                             包含 SystemMessage 摘要 + 热层消息。
         """
         if has_similar:
             cases_text = format_similar_cases_for_prompt(similar_cases)
@@ -385,13 +402,21 @@ class LangChainDiagnosticAgent:
             user_prompt = build_no_similar_case_prompt(description=description)
 
         # 多轮历史消息注入：
-        # LangChain create_agent 是无状态的，不会自动记住上一轮对话。
-        # 这里把历史消息列表（HumanMessage + AIMessage + ToolMessage）直接拼入
-        # invoke 的 messages 列表，Agent 能看到之前每一轮的工具调用和返回结果。
+        # 两种路径：
+        # 1. prepared_messages：ContextManager.prepare_from_context() 已构建好
+        #    包括 SystemMessage(摘要) + 热层消息，只需追加当前 user_prompt
+        # 2. history_messages：SessionManager.get_context() 扁平化 dict 列表
         invoke_messages: list = []
-        if history_messages:
+        if prepared_messages:
+            # prepared_messages 已包含 SystemMessage(摘要) + 热层消息
+            invoke_messages.extend(prepared_messages)
+            # 追加当前用户 prompt（含相似工况）
+            invoke_messages.append({"role": "user", "content": user_prompt})
+        elif history_messages:
             invoke_messages.extend(messages_from_dict(history_messages))
-        invoke_messages.append({"role": "user", "content": user_prompt})
+            invoke_messages.append({"role": "user", "content": user_prompt})
+        else:
+            invoke_messages.append({"role": "user", "content": user_prompt})
 
         # Token 预算裁剪：在 LLM 调用前按 window_size 和 max_tokens 裁剪消息
         prepare_result = self._context_manager.prepare(invoke_messages)

@@ -222,32 +222,61 @@ def _run_standard_diagnosis(
 ) -> dict:
     """执行标准接口诊断并输出/保存结果
 
-    流程：构造 Agent → SessionManager 构建上下文 → diagnose_with_standard_input
+    流程：构造 Agent → ContextManager 构建上下文 → diagnose_with_standard_input
           → 控制台输出 + 保存 JSON + 显示会话状态。
     错误状态（code != 0）只输出 code + msg，不输出 diagnosis_result。
     """
     from .agent.session_manager import SessionManager
+    from .agent.context_manager import SimpleContextManager
+    from .agent.context.summarizer import Summarizer
+    from .agent.context.topic_detector import TopicDetector
+
     session_manager = SessionManager()
     session_id = standard_input.session_id or ""
 
-    # 构建多轮上下文（消息列表）
-    history_messages = session_manager.get_context(session_id)
-    if history_messages:
-        console.print(f"  [dim]会话 {session_id}: 第 {session_manager.get_round_count(session_id)} 轮历史已注入[/dim]")
-
     settings = get_settings()
+
+    # 初始化上下文管理器（含摘要+话题检测）
+    context_manager = SimpleContextManager(
+        window_size=settings.context.window_size,
+        max_tokens=settings.context.max_tokens,
+        summarizer=Summarizer(
+            strategy=settings.context.summary_strategy,
+            max_tokens=settings.context.summary_max_tokens,
+        ) if settings.context.summary_enabled else None,
+        topic_detector=TopicDetector(
+            strategy=settings.context.topic_detection_strategy,
+            similarity_threshold=settings.context.topic_similarity_threshold,
+        ) if settings.context.topic_detection_enabled else None,
+    )
+
+    # 构建多轮上下文（三步降级 + 摘要注入）
+    prepared_result = None
+    ctx = session_manager.get_conversation_context(session_id)
+    if ctx and session_id:
+        prepared_result = context_manager.prepare_from_context(
+            ctx, standard_input.raw_query,
+        )
+        # 将裁剪后的热层写回（SessionManager 持久化）
+        session_manager._save_to_disk(session_id)
+        if prepared_result.messages:
+            console.print(
+                f"  [dim]会话 {session_id}: 第 {session_manager.get_round_count(session_id)} 轮 "
+                f"历史已注入 ({len(prepared_result.messages)} 条消息)"
+            )
 
     try:
         agent = LangChainDiagnosticAgent(settings=settings)
         standard_output = agent.diagnose_with_standard_input(
-            standard_input, history_messages=history_messages,
+            standard_input,
+            prepared_messages=prepared_result.messages if prepared_result else None,
         )
     except Exception as e:
         error_output = {"code": -2, "msg": f"Agent输出异常: {e}"}
         console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
         raise typer.Exit(1)
 
-    # 存储本轮完整消息列表（成功时）
+    # 存储本轮新增消息（成功时）
     if standard_output.code == 0 and session_id:
         from langchain_core.messages import messages_to_dict
         current_messages = messages_to_dict(getattr(agent, "_last_messages", []))
@@ -666,6 +695,23 @@ def chat(
     settings = get_settings()
     from .agent.session_manager import SessionManager
     from .agent.langchain_agent import LangChainDiagnosticAgent
+    from .agent.context_manager import SimpleContextManager
+    from .agent.context.summarizer import Summarizer
+    from .agent.context.topic_detector import TopicDetector
+
+    # 初始化上下文管理器
+    context_manager = SimpleContextManager(
+        window_size=settings.context.window_size,
+        max_tokens=settings.context.max_tokens,
+        summarizer=Summarizer(
+            strategy=settings.context.summary_strategy,
+            max_tokens=settings.context.summary_max_tokens,
+        ) if settings.context.summary_enabled else None,
+        topic_detector=TopicDetector(
+            strategy=settings.context.topic_detection_strategy,
+            similarity_threshold=settings.context.topic_similarity_threshold,
+        ) if settings.context.topic_detection_enabled else None,
+    )
 
     console.print(Panel.fit("🔍 故障诊断 Agent — 交互模式", style="bold blue"))
     _print_model_status(settings)
@@ -680,22 +726,33 @@ def chat(
 
     round_num = sm.get_round_count(sess_id) + 1
 
-    # 如果传了初始问题，先处理这一轮
-    if initial_question:
+    def _do_chat_round(query: str, sess_id: str, mcuid: str, round_num: int):
+        """执行一轮对话"""
+        nonlocal context_manager, agent, sm
+
         standard_input = StandardInput(
-            raw_query=initial_question,
+            raw_query=query,
             mcuid=mcuid,
             session_id=sess_id,
             entities=StandardEntities(),
         )
-        history_messages = sm.get_context(sess_id)
+
+        # 构建上下文（三步降级 + 摘要注入）
+        ctx = sm.get_conversation_context(sess_id)
+        prepared = None
+        if ctx:
+            prepared = context_manager.prepare_from_context(ctx, query)
+            sm._save_to_disk(sess_id)
+
         standard_output = agent.diagnose_with_standard_input(
-            standard_input, history_messages=history_messages,
+            standard_input,
+            prepared_messages=prepared.messages if prepared else None,
         )
+
         if standard_output.code == 0:
             from langchain_core.messages import messages_to_dict
             current_messages = messages_to_dict(getattr(agent, "_last_messages", []))
-            sm.update(sess_id, initial_question, current_messages)
+            sm.update(sess_id, query, current_messages)
             result = standard_output.diagnosis_result
             if result:
                 console.print(f"  [cyan]分类:[/cyan] {result.classification}")
@@ -705,6 +762,10 @@ def chat(
                 console.print()
         else:
             console.print(f"  [red]诊断失败: {standard_output.msg}[/red]")
+
+    # 如果传了初始问题，先处理这一轮
+    if initial_question:
+        _do_chat_round(initial_question, sess_id, mcuid, round_num)
         round_num += 1
 
     while True:
@@ -720,36 +781,7 @@ def chat(
             console.print(f"[dim]已退出，会话 {sess_id} 共 {round_num - 1} 轮[/dim]")
             break
 
-        # 构建标准输入
-        standard_input = StandardInput(
-            raw_query=user_input,
-            mcuid=mcuid,
-            session_id=sess_id,
-            entities=StandardEntities(),
-        )
-
-        history_messages = sm.get_context(sess_id)
-        if history_messages:
-            console.print(f"  [dim]已注入 {sm.get_round_count(sess_id)} 轮历史[/dim]")
-
-        standard_output = agent.diagnose_with_standard_input(
-            standard_input, history_messages=history_messages,
-        )
-
-        if standard_output.code == 0:
-            from langchain_core.messages import messages_to_dict
-            current_messages = messages_to_dict(getattr(agent, "_last_messages", []))
-            sm.update(sess_id, user_input, current_messages)
-            result = standard_output.diagnosis_result
-            if result:
-                console.print(f"  [cyan]分类:[/cyan] {result.classification}")
-                console.print(f"  [cyan]根因:[/cyan] {result.fault_root_cause[0] if result.fault_root_cause else 'N/A'}")
-                console.print(f"  [cyan]方案:[/cyan] {result.solution[0] if result.solution else 'N/A'}")
-                console.print(f"  [cyan]置信度:[/cyan] {standard_output.diagnosis_confidence:.0%}")
-                console.print()
-        else:
-            console.print(f"  [red]诊断失败: {standard_output.msg}[/red]")
-
+        _do_chat_round(user_input, sess_id, mcuid, round_num)
         round_num += 1
 
 

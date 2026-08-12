@@ -92,13 +92,13 @@ context:
   window_size: 5       # 热层窗口大小（轮次），保留最近 N 轮完整消息
 
   # ── 温层配置 ──
-  summary_enabled: false       # 是否启用摘要（Step 1 实现）
+  summary_enabled: true        # 是否启用摘要（Step 1 实现）
   summary_max_tokens: 500      # 摘要最大 token 数
-  summary_strategy: "rule"     # 摘要策略: llm | rule | template
+  summary_strategy: "llm"      # 摘要策略: llm | rule | template
 
   # ── 话题检测配置 ──
-  topic_detection_enabled: false      # 是否启用话题检测（Step 1 实现）
-  topic_detection_strategy: "rule"    # 话题检测策略: embedding | llm | hybrid | rule
+  topic_detection_enabled: true      # 是否启用话题检测（Step 1 实现）
+  topic_detection_strategy: "embedding+llm"    # 话题检测策略: embedding | llm | hybrid | rule
   topic_similarity_threshold: 0.7     # 话题相似度阈值
 
   # ── 生命周期配置 ──

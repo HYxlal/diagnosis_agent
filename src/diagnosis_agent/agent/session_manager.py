@@ -274,10 +274,12 @@ class SessionManager:
             user_id=user_id,
         )
 
-        # 写入归档目录
+        # 写入归档目录（双份：ArchivedSession + 完整 ConversationContext）
         if self._persist_dir:
             archive_dir = Path(self._persist_dir) / "archive"
             archive_dir.mkdir(parents=True, exist_ok=True)
+
+            # 1) 归档记录 ArchivedSession
             archive_path = archive_dir / f"{ctx.session_id}.json"
             try:
                 with open(archive_path, "w", encoding="utf-8") as f:
@@ -286,6 +288,16 @@ class SessionManager:
                     )
             except OSError as e:
                 logger.warning(f"归档会话 {session_id} 失败: {e}")
+
+            # 2) 完整 ConversationContext 快照
+            snapshot_path = archive_dir / f"{ctx.session_id}.snapshot.json"
+            try:
+                with open(snapshot_path, "w", encoding="utf-8") as f:
+                    json.dump(
+                        ctx.to_dict(), f, ensure_ascii=False, indent=2
+                    )
+            except OSError as e:
+                logger.warning(f"归档快照 {session_id} 失败: {e}")
 
         # 清除内存和活跃文件
         self.clear(session_id)

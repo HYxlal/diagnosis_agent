@@ -165,15 +165,6 @@ class LangChainDiagnosticAgent:
             router = InputRouter(self.settings)
             parsed_input = router.route(parsed_input)
 
-            # 检查是否为非电驱问题
-            if parsed_input.intent == InputIntent.OUT_OF_SCOPE:
-                logger.info("识别为非电驱系统问题，返回 -3 状态码")
-                return build_error_output(
-                    code=OutputCode.OUT_OF_SCOPE,
-                    msg="识别为非电驱系统问题，不执行诊断",
-                    standard_input=standard_input,
-                )
-
             # 把 history_messages / prepared_messages 透传给内部 diagnose
             diagnostic_output = self.diagnose(
                 parsed_input,

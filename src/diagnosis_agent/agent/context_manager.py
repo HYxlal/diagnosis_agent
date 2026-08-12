@@ -294,15 +294,15 @@ class SimpleContextManager:
                 )
 
         # ── 三步降级 ──
-        # 步骤1: 热层 → 温层
+        # 步骤1: 热层 → 温层（滚动摘要）
         hot_rounds = self._count_hot_rounds(ctx)
         if hot_rounds > self.window_size:
             self._step1_hot_to_warm(ctx)
             trim_info.step = "summarize"
             trim_info.summarized_turns = hot_rounds - self.window_size
 
-        # 步骤2: 温层合并
-        if ctx.warm_summaries and self._count_tokens_from_summaries(ctx.warm_summaries) > self.max_tokens * 0.3:
+        # 步骤2: 温层摘要合并（如果摘要列表超过 2 个，合并为 1 个滚动摘要）
+        if ctx.warm_summaries and len(ctx.warm_summaries) > 1:
             self._step2_merge_warm(ctx)
             if trim_info.step == "none":
                 trim_info.step = "summarize"
@@ -355,17 +355,18 @@ class SimpleContextManager:
     # ------------------------------------------------------------------
 
     def _step1_hot_to_warm(self, ctx: ConversationContext) -> None:
-        """步骤1: 热层→温层
+        """步骤1: 热层→温层（滚动摘要）
 
         将超出 window_size 的最早轮次消息移出热层，
-        生成摘要并存入温层。
+        合并进已有的会话滚动摘要（而不是每个旧轮次单独摘要）。
+
+        如果温层已有摘要，则把溢出消息与旧摘要一起重新生成/合并；
+        如果温层为空，则创建第一个滚动摘要。
         """
-        # 找到需要保留的起始位置（最近 window_size 轮）
         boundaries = self._find_hot_round_boundaries(ctx)
         if len(boundaries) <= self.window_size:
             return
 
-        # 保留最近 window_size 轮
         keep_from = boundaries[-self.window_size]
         overflow = ctx.hot_messages[:keep_from]
 
@@ -373,19 +374,27 @@ class SimpleContextManager:
             return
 
         logger.info(
-            f"步骤1: 热层→温层 — 将 {len(overflow)} 条消息压缩为摘要 "
+            f"步骤1: 热层→温层 — 将 {len(overflow)} 条消息合并到滚动摘要 "
             f"(保留最近 {self.window_size} 轮)"
         )
 
         if self.summarizer:
             from .context.types import TopicSnapshot
-            snapshot = self.summarizer.summarize(
+            new_snapshot = self.summarizer.summarize(
                 overflow,
-                topic_label=f"对话-{ctx.total_turns - self.window_size + 1}-{ctx.total_turns}轮",
+                topic_label=f"会话摘要-{ctx.total_turns - self.window_size + 1}-{ctx.total_turns}轮",
                 start_turn=ctx.total_turns - self.window_size,
                 end_turn=ctx.total_turns,
             )
-            ctx.warm_summaries.append(snapshot)
+
+            if ctx.warm_summaries:
+                # 滚动合并：新摘要 + 旧摘要 → 一个统一的会话摘要
+                merged = self.summarizer.merge_summaries(
+                    [new_snapshot] + ctx.warm_summaries
+                )
+                ctx.warm_summaries = [merged]
+            else:
+                ctx.warm_summaries = [new_snapshot]
 
         # 从热层移除
         ctx.hot_messages = ctx.hot_messages[keep_from:]

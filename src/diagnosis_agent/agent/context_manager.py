@@ -258,22 +258,8 @@ class SimpleContextManager:
         if self.topic_detector and ctx.total_turns > 0:
             decision = self.topic_detector.detect(ctx, query)
             if not decision.is_in_scope:
-                logger.warning(f"话题不在电驱范围内: {query[:100]}")
-                # 返回标记为 out_of_scope 的 PrepareResult
-                return PrepareResult(
-                    messages=[],
-                    metadata=ContextMetadata(
-                        session_id=ctx.session_id,
-                        total_turns=ctx.total_turns,
-                        warm_summary_count=len(ctx.warm_summaries),
-                        archived_topic_count=ctx.archived_topic_count,
-                        current_topic=getattr(ctx.current_topic, 'topic_label', None),
-                        topic_changed=False,
-                        trim_info=trim_info,
-                        token_usage=0,
-                        timestamp=datetime.now(timezone.utc).isoformat(),
-                    ),
-                )
+                logger.warning(f"话题检测器判定不在电驱范围内: {query[:100]}")
+                # 不中断流程，继续构建消息（is_in_scope 仅作参考，不阻断）
 
             if decision.decision == "different":
                 topic_changed = True
@@ -299,45 +285,51 @@ class SimpleContextManager:
                 )
                 # 步骤5: 旧摘要已存入 warm_summaries，后续构建消息时注入 SystemMessage
 
-        # ── 三步降级 ──
-        # 步骤1: 热层 → 温层（滚动摘要）
+        # ── 三步降级（两层触发：window_size + token 预算） ──
+        # 步骤1: 热层超 window_size → 溢出消息生成摘要，追加到温层
         hot_rounds = self._count_hot_rounds(ctx)
         if hot_rounds > self.window_size:
             self._step1_hot_to_warm(ctx)
             trim_info.step = "summarize"
             trim_info.summarized_turns = hot_rounds - self.window_size
 
-        # 步骤2: 温层摘要合并（如果摘要列表超过 2 个，合并为 1 个滚动摘要）
-        if ctx.warm_summaries and len(ctx.warm_summaries) > 1:
-            self._step2_merge_warm(ctx)
-            if trim_info.step == "none":
-                trim_info.step = "summarize"
-
-        # 步骤3: 紧急截断（token 预算仍超时）
-        # 在构建消息后检查
-
-        # ── 构建消息 ──
+        # ── 构建消息（初始版本，用于检查 token 预算） ──
         messages: list = []
-        # 注入温层摘要为 SystemMessage
         if ctx.warm_summaries:
             summary_text = self._build_summary_text(ctx)
             if summary_text:
                 messages.append(SystemMessage(content=summary_text))
-        # 热层消息
         if ctx.hot_messages:
             messages.extend(messages_from_dict(ctx.hot_messages))
-        # 当前查询
         messages.append({"role": "user", "content": query})
 
-        # 步骤3: 紧急截断
+        # 检查 token 预算
         token_usage = self._count_tokens(messages)
         if token_usage > self.max_tokens:
-            messages = self._step3_emergency_truncate(messages)
-            if trim_info.step not in ("summarize",):
-                trim_info.step = "emergency"
-            trim_info.trimmed_turns = self._count_rounds_dropped(
-                messages, 0
-            )
+            # 步骤2: 温层摘要合并（多个摘要 → 一个精炼摘要）
+            if ctx.warm_summaries and len(ctx.warm_summaries) > 1:
+                self._step2_merge_warm(ctx)
+                trim_info.step = "summarize"
+
+                # 重建消息
+                messages = []
+                if ctx.warm_summaries:
+                    summary_text = self._build_summary_text(ctx)
+                    if summary_text:
+                        messages.append(SystemMessage(content=summary_text))
+                if ctx.hot_messages:
+                    messages.extend(messages_from_dict(ctx.hot_messages))
+                messages.append({"role": "user", "content": query})
+
+                # 重新检查
+                token_usage = self._count_tokens(messages)
+
+            # 步骤3: 仍超标 → 紧急截断（保留最近 2 轮 + 摘要）
+            if token_usage > self.max_tokens:
+                messages = self._step3_emergency_truncate(messages)
+                if trim_info.step != "summarize":
+                    trim_info.step = "emergency"
+                trim_info.trimmed_turns = self._count_rounds_dropped(messages, 0)
 
         # 最终裁剪
         result = self.prepare(messages)
@@ -361,13 +353,13 @@ class SimpleContextManager:
     # ------------------------------------------------------------------
 
     def _step1_hot_to_warm(self, ctx: ConversationContext) -> None:
-        """步骤1: 热层→温层（滚动摘要）
+        """步骤1: 热层→温层（追加摘要）
 
         将超出 window_size 的最早轮次消息移出热层，
-        合并进已有的会话滚动摘要（而不是每个旧轮次单独摘要）。
+        生成摘要后追加到温层列表（不合并）。
 
-        如果温层已有摘要，则把溢出消息与旧摘要一起重新生成/合并；
-        如果温层为空，则创建第一个滚动摘要。
+        每次热层溢出只追加一个新摘要，不合并旧摘要。
+        温层摘要数量会逐步增长，直到步骤2按 token 预算合并。
         """
         boundaries = self._find_hot_round_boundaries(ctx)
         if len(boundaries) <= self.window_size:
@@ -380,27 +372,19 @@ class SimpleContextManager:
             return
 
         logger.info(
-            f"步骤1: 热层→温层 — 将 {len(overflow)} 条消息合并到滚动摘要 "
-            f"(保留最近 {self.window_size} 轮)"
+            f"步骤1: 热层→温层 — 将 {len(overflow)} 条消息压缩为摘要 "
+            f"(保留最近 {self.window_size} 轮，温层 {len(ctx.warm_summaries) + 1} 个摘要)"
         )
 
         if self.summarizer:
             from .context.types import TopicSnapshot
             new_snapshot = self.summarizer.summarize(
                 overflow,
-                topic_label=f"会话摘要-{ctx.total_turns - self.window_size + 1}-{ctx.total_turns}轮",
+                topic_label=f"对话摘要-{ctx.total_turns - self.window_size + 1}-{ctx.total_turns}轮",
                 start_turn=ctx.total_turns - self.window_size,
                 end_turn=ctx.total_turns,
             )
-
-            if ctx.warm_summaries:
-                # 滚动合并：新摘要 + 旧摘要 → 一个统一的会话摘要
-                merged = self.summarizer.merge_summaries(
-                    [new_snapshot] + ctx.warm_summaries
-                )
-                ctx.warm_summaries = [merged]
-            else:
-                ctx.warm_summaries = [new_snapshot]
+            ctx.warm_summaries.append(new_snapshot)
 
         # 从热层移除
         ctx.hot_messages = ctx.hot_messages[keep_from:]
@@ -408,13 +392,16 @@ class SimpleContextManager:
     def _step2_merge_warm(self, ctx: ConversationContext) -> None:
         """步骤2: 温层摘要合并
 
-        温层摘要过多时，合并为一个精炼摘要。
+        按 token 预算触发：温层摘要过多时合并为一个精炼摘要。
+        合并后减少 LLM 调用次数，控制 SystemMessage 长度。
         """
         if not ctx.warm_summaries or len(ctx.warm_summaries) <= 1:
             return
 
+        total = self._count_tokens_from_summaries(ctx.warm_summaries)
         logger.info(
-            f"步骤2: 温层合并 — 合并 {len(ctx.warm_summaries)} 个摘要"
+            f"步骤2: 温层合并 — 合并 {len(ctx.warm_summaries)} 个摘要 "
+            f"({total} tokens)"
         )
 
         if self.summarizer:

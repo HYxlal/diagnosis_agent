@@ -8,7 +8,7 @@ app:
 
 # LLM 配置（阿里云通义千问 Qwen）
 llm:
-  model: "${LLM_MODEL_NAME:qwen-plus}"
+  model: "${LLM_MODEL_NAME:qwen-turbo}"
   temperature: 0.3
   max_tokens: 4096
   api_key: "${DASHSCOPE_API_KEY}"

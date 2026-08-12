@@ -278,10 +278,15 @@ class SimpleContextManager:
             if decision.decision == "different":
                 topic_changed = True
                 logger.info(f"话题切换: {decision.new_topic_label}")
-                # 旧话题生成摘要
+                # 步骤1: 生成旧话题摘要
                 if self.summarizer and ctx.current_topic:
                     self._summarize_current_topic(ctx)
-                # 创建新话题
+                # 步骤2: 归档旧话题（完整消息快照存入冷层）
+                if ctx.hot_messages:
+                    self._archive_topic_snapshot(ctx)
+                # 步骤3: 清空热层
+                ctx.hot_messages = []
+                # 步骤4: 创建新话题
                 from .context.types import TopicSnapshot
                 ctx.current_topic = TopicSnapshot(
                     topic_id=ctx.session_id + "-" + str(ctx.total_turns),
@@ -292,6 +297,7 @@ class SimpleContextManager:
                     key_entities=[],
                     created_at=datetime.now(timezone.utc).isoformat(),
                 )
+                # 步骤5: 旧摘要已存入 warm_summaries，后续构建消息时注入 SystemMessage
 
         # ── 三步降级 ──
         # 步骤1: 热层 → 温层（滚动摘要）
@@ -443,15 +449,14 @@ class SimpleContextManager:
     # ------------------------------------------------------------------
 
     def _summarize_current_topic(self, ctx: ConversationContext) -> None:
-        """将当前话题的全量消息生成摘要，存入温层"""
+        """步骤1: 将当前话题的全量消息生成摘要，存入温层"""
         if not self.summarizer or not ctx.current_topic:
             return
 
         start_turn = ctx.current_topic.start_turn
         end_turn = ctx.current_topic.end_turn
 
-        # 收集当前话题范围内的消息
-        topic_msgs = ctx.hot_messages[:]  # 当前热层全部属于当前话题
+        topic_msgs = ctx.hot_messages[:]
         if not topic_msgs:
             return
 
@@ -463,6 +468,36 @@ class SimpleContextManager:
         )
         ctx.warm_summaries.append(snapshot)
         logger.info(f"话题摘要已生成: {snapshot.topic_label}")
+
+    def _archive_topic_snapshot(self, ctx: ConversationContext) -> None:
+        """步骤2: 归档旧话题完整消息到冷层
+
+        将当前热层的完整消息写入冷层归档文件。
+        文件路径: data/sessions/archive/{session_id}_{topic_id}.snapshot.json
+        """
+        import json
+        from pathlib import Path
+
+        if not ctx.hot_messages or not ctx.current_topic:
+            return
+
+        try:
+            archive_dir = Path("data/sessions/archive")
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            path = archive_dir / f"{ctx.session_id}_{ctx.current_topic.topic_id}.snapshot.json"
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "session_id": ctx.session_id,
+                    "topic_id": ctx.current_topic.topic_id,
+                    "topic_label": ctx.current_topic.topic_label,
+                    "start_turn": ctx.current_topic.start_turn,
+                    "end_turn": ctx.current_topic.end_turn,
+                    "messages": ctx.hot_messages,
+                    "total_messages": len(ctx.hot_messages),
+                }, f, ensure_ascii=False, indent=2)
+            logger.info(f"话题快照已归档: {path}")
+        except OSError as e:
+            logger.warning(f"归档话题快照失败: {e}")
 
     def _build_summary_text(self, ctx: ConversationContext) -> str:
         """构建温层摘要 SystemMessage 文本"""

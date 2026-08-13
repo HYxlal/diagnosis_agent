@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -33,45 +34,54 @@ from .context.types import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 分词器（延迟初始化，首次使用时才加载 tiktoken）
+# 分词器（延迟初始化，直接加载本地 BPE 文件，不依赖网络）
 # ---------------------------------------------------------------------------
 
 _enc = None
 _enc_loaded = False
+_BPE_CACHE_PATH = os.path.expanduser("~/.cache/tiktoken/cl100k_base.tiktoken")
 
 
 def _get_encoding():
-    """获取 tiktoken 编码器（延迟加载，带超时）"""
+    """获取 tiktoken 编码器（延迟加载，加载本地缓存文件）
+
+    直接用 load_tiktoken_bpe 加载本地文件，绕过 tiktoken.get_encoding()
+    的网络请求（当前环境 Azure 无法连通）。
+
+    BPE 文件缓存路径：~/.cache/tiktoken/cl100k_base.tiktoken
+    完整文件约 1.68MB，加载耗时约 0.12s。
+    """
     global _enc, _enc_loaded
     if _enc_loaded:
         return _enc
     _enc_loaded = True
 
     try:
-        import tiktoken
-        import threading
+        from tiktoken.load import load_tiktoken_bpe
+        from tiktoken.core import Encoding
 
-        result = [None]
-        error = [None]
+        if not os.path.exists(_BPE_CACHE_PATH):
+            logger.warning(f"tiktoken BPE 文件不存在: {_BPE_CACHE_PATH}，使用字符数估算")
+            return None
 
-        def _load():
-            try:
-                result[0] = tiktoken.get_encoding("cl100k_base")
-            except Exception as e:
-                error[0] = e
-
-        t = threading.Thread(target=_load, daemon=True)
-        t.start()
-        t.join(3.0)  # 3 秒超时
-
-        if t.is_alive():
-            logger.warning("tiktoken 加载超时（3s），使用字符数估算 token 数")
-        elif error[0]:
-            logger.warning(f"tiktoken 加载失败: {error[0]}，使用字符数估算")
-        else:
-            _enc = result[0]
+        mergeable_ranks = load_tiktoken_bpe(_BPE_CACHE_PATH)
+        _enc = Encoding(
+            name="cl100k_base",
+            pat_str=r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+",
+            mergeable_ranks=mergeable_ranks,
+            special_tokens={
+                "<|endoftext|>": 100256,
+                "<|fim_prefix|>": 100257,
+                "<|fim_middle|>": 100258,
+                "<|fim_suffix|>": 100259,
+                "<|endofprompt|>": 100260,
+            },
+        )
+        logger.info(f"tiktoken 加载成功 ({len(mergeable_ranks)} tokens)")
     except ImportError:
         logger.warning("tiktoken 未安装，使用字符数估算 token 数")
+    except Exception as e:
+        logger.warning(f"tiktoken 加载失败: {e}，使用字符数估算 token 数")
 
     return _enc
 

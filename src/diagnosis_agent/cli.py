@@ -29,6 +29,7 @@ from .agent.input_router import InputRouter
 from .agent.langchain_agent import LangChainDiagnosticAgent
 from .config import Settings, get_settings, reset_settings
 from .models.converter import diagnostic_output_to_standard
+from .models.diagnostic_output import OutputCode, StandardOutput
 from .models.input import InputIntent, InputType, ParsedInput, StandardEntities, StandardInput
 from .models.incident import IncidentRecord
 from .parsers.unified import parse_input
@@ -248,6 +249,16 @@ def _run_standard_diagnosis(
             strategy=settings.context.topic_detection_strategy,
             threshold_high=settings.context.topic_similarity_high,
             threshold_low=settings.context.topic_similarity_low,
+            model=settings.context.topic_detection_model or None,
+            switch_signal_words=settings.context.topic_signal_words.get("switch", []),
+            continue_signal_words=settings.context.topic_signal_words.get("continue", []),
+            entity_overlap_enabled=settings.context.entity_overlap_enabled,
+            time_decay_short_sec=settings.context.topic_time_decay_short_sec if settings.context.topic_time_decay_enabled else 0,
+            time_decay_short_max_len=settings.context.topic_time_decay_short_max_len,
+            time_decay_long_sec=settings.context.topic_time_decay_long_sec,
+            scope_detection_enabled=settings.context.scope_detection_enabled,
+            scope_use_llm=settings.context.scope_use_llm,
+            scope_out_keywords=settings.context.scope_out_keywords,
         ) if settings.context.topic_detection_enabled else None,
     )
 
@@ -258,24 +269,31 @@ def _run_standard_diagnosis(
         prepared_result = context_manager.prepare_from_context(
             ctx, standard_input.raw_query,
         )
-        # 将裁剪后的热层写回（SessionManager 持久化）
-        session_manager._save_to_disk(session_id)
         if prepared_result.messages:
             console.print(
                 f"  [dim]会话 {session_id}: 第 {session_manager.get_round_count(session_id)} 轮 "
                 f"历史已注入 ({len(prepared_result.messages)} 条消息)"
             )
 
-    try:
-        agent = LangChainDiagnosticAgent(settings=settings)
-        standard_output = agent.diagnose_with_standard_input(
-            standard_input,
-            prepared_messages=prepared_result.messages if prepared_result else None,
+    # scope 检测判定不在范围内，直接返回 -3，不调用 Agent
+    if prepared_result and not prepared_result.metadata.is_in_scope:
+        from .models.converter import build_error_output
+        standard_output = build_error_output(
+            code=OutputCode.OUT_OF_SCOPE,
+            msg="查询不在车辆电驱系统故障诊断范围内",
+            standard_input=standard_input,
         )
-    except Exception as e:
-        error_output = {"code": -2, "msg": f"Agent输出异常: {e}"}
-        console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
-        raise typer.Exit(1)
+    else:
+        try:
+            agent = LangChainDiagnosticAgent(settings=settings)
+            standard_output = agent.diagnose_with_standard_input(
+                standard_input,
+                prepared_messages=prepared_result.messages if prepared_result else None,
+            )
+        except Exception as e:
+            error_output = {"code": -2, "msg": f"Agent输出异常: {e}"}
+            console.print(json.dumps(error_output, ensure_ascii=False, indent=2))
+            raise typer.Exit(1)
 
     # 存储本轮新增消息（成功时）
     if standard_output.code == 0 and session_id:
@@ -712,6 +730,16 @@ def chat(
             strategy=settings.context.topic_detection_strategy,
             threshold_high=settings.context.topic_similarity_high,
             threshold_low=settings.context.topic_similarity_low,
+            model=settings.context.topic_detection_model or None,
+            switch_signal_words=settings.context.topic_signal_words.get("switch", []),
+            continue_signal_words=settings.context.topic_signal_words.get("continue", []),
+            entity_overlap_enabled=settings.context.entity_overlap_enabled,
+            time_decay_short_sec=settings.context.topic_time_decay_short_sec if settings.context.topic_time_decay_enabled else 0,
+            time_decay_short_max_len=settings.context.topic_time_decay_short_max_len,
+            time_decay_long_sec=settings.context.topic_time_decay_long_sec,
+            scope_detection_enabled=settings.context.scope_detection_enabled,
+            scope_use_llm=settings.context.scope_use_llm,
+            scope_out_keywords=settings.context.scope_out_keywords,
         ) if settings.context.topic_detection_enabled else None,
     )
 
@@ -744,12 +772,20 @@ def chat(
         prepared = None
         if ctx:
             prepared = context_manager.prepare_from_context(ctx, query)
-            sm._save_to_disk(sess_id)
 
-        standard_output = agent.diagnose_with_standard_input(
-            standard_input,
-            prepared_messages=prepared.messages if prepared else None,
-        )
+        # scope 检测判定不在范围内，直接返回 -3
+        if prepared and not prepared.metadata.is_in_scope:
+            from .models.converter import build_error_output
+            standard_output = build_error_output(
+                code=OutputCode.OUT_OF_SCOPE,
+                msg="查询不在车辆电驱系统故障诊断范围内",
+                standard_input=standard_input,
+            )
+        else:
+            standard_output = agent.diagnose_with_standard_input(
+                standard_input,
+                prepared_messages=prepared.messages if prepared else None,
+            )
 
         if standard_output.code == 0:
             from langchain_core.messages import messages_to_dict

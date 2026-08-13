@@ -263,13 +263,14 @@ class SimpleContextManager:
 
         trim_info = TrimInfo()
         topic_changed = False
+        is_in_scope = True
 
         # ── 话题检测 ──
-        if self.topic_detector and ctx.total_turns > 0:
+        if self.topic_detector:
             decision = self.topic_detector.detect(ctx, query)
+            is_in_scope = decision.is_in_scope
             if not decision.is_in_scope:
                 logger.warning(f"话题检测器判定不在电驱范围内: {query[:100]}")
-                # 不中断流程，继续构建消息（is_in_scope 仅作参考，不阻断）
 
             if decision.decision == "different":
                 topic_changed = True
@@ -353,6 +354,7 @@ class SimpleContextManager:
         result.metadata.warm_summary_count = len(ctx.warm_summaries)
         result.metadata.archived_topic_count = ctx.archived_topic_count
         result.metadata.topic_changed = topic_changed
+        result.metadata.is_in_scope = is_in_scope
         if ctx.current_topic:
             result.metadata.current_topic = ctx.current_topic.topic_label
 

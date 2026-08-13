@@ -145,8 +145,9 @@ class Summarizer:
 
     def _create_llm(self):
         settings = get_settings()
+        model = settings.context.summary_model or settings.llm.model
         return create_llm(
-            model=get_settings().llm.model,
+            model=model,
             temperature=0.1,
             max_tokens=self.max_tokens,
         )

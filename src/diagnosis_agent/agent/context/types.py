@@ -70,6 +70,7 @@ class ContextMetadata:
     archived_topic_count: int = 0
     current_topic: str | None = None
     topic_changed: bool = False
+    is_in_scope: bool = True
     trim_info: TrimInfo = field(default_factory=TrimInfo)
     token_usage: int = 0
     timestamp: str = ""

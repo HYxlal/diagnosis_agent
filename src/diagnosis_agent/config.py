@@ -135,8 +135,54 @@ class ContextConfig(BaseModel):
     # ── 话题检测配置 ──
     topic_detection_enabled: bool = False      # 是否启用话题检测
     topic_detection_strategy: str = "rule"     # 话题检测策略: embedding | llm | hybrid | rule
+    topic_detection_model: str = ""            # 话题检测 LLM 模型，空则使用主 LLM
     topic_similarity_high: float = 0.6         # embedding 快筛高阈值（≥此值判 same）
     topic_similarity_low: float = 0.27         # embedding 快筛低阈值（≤此值判 diff）
+
+    # ── 话题检测信号词（外部化配置） ──
+    # switch: 检测到直接判 different（用户明确切换话题）
+    # continue: 检测到增加延续倾向（辅助，默认空列表）
+    topic_signal_words: dict = Field(
+        default_factory=lambda: {
+            "switch": [
+                "换一个问题",
+                "换个话题",
+                "新问题",
+                "另外",
+                "另一个问题",
+                "不是这个",
+                "换一个",
+            ],
+            "continue": [],
+        }
+    )
+
+    # ── 实体重叠检测 ──
+    # 用 ctx.current_topic.key_entities 与 query 做字符串匹配
+    # 重叠率高（>50%）→ 辅助判 same
+    entity_overlap_enabled: bool = False
+
+    # ── 时间衰减检测 ──
+    # 短间隔（<short_sec）+ 短消息 → 判延续 same
+    # 长间隔（>long_sec）→ 判可能切换 different
+    topic_time_decay_enabled: bool = False
+    topic_time_decay_short_sec: int = 30       # 短间隔阈值（秒）
+    topic_time_decay_short_max_len: int = 20   # 短消息最大字符数
+    topic_time_decay_long_sec: int = 1800      # 长间隔阈值（秒）
+
+    # ── 领域范围检测（scope） ──
+    # 首轮 + 话题切换后，判断 query 是否在电驱诊断范围内
+    # 只做 out 关键词快速排除，不做 in 关键词判断（太粗糙，如"电机相关的工程师"会被误判）
+    scope_detection_enabled: bool = False
+    scope_use_llm: bool = True                    # 关键词无法判断时，是否用 LLM 精判
+    scope_out_keywords: list[str] = Field(default_factory=lambda: [
+        "电池包", "充电桩", "OBC", "音响", "空调", "外观",
+        "娱乐", "导航", "座椅", "车窗", "天气", "股票",
+        "外卖", "电影", "快递",
+    ])
+
+    # ── 摘要配置 ──
+    summary_model: str = ""                    # 摘要 LLM 模型，空则使用主 LLM
 
     # ── 生命周期配置 ──
     max_turns: int = 100                   # 最大保留轮次（超过后强制归档）

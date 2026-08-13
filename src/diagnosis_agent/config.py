@@ -28,7 +28,7 @@ class LLMConfig(BaseModel):
 
 
 class EmbeddingConfig(BaseModel):
-    model: str = "text-embedding-v2"
+    model: str = "text-embedding-v3"
     api_key: str = ""
     api_base: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     # dashscope（默认，手写 requests，兼容阿里云百炼 input 格式）

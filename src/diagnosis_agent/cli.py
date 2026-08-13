@@ -246,7 +246,8 @@ def _run_standard_diagnosis(
         ) if settings.context.summary_enabled else None,
         topic_detector=TopicDetector(
             strategy=settings.context.topic_detection_strategy,
-            similarity_threshold=settings.context.topic_similarity_threshold,
+            threshold_high=settings.context.topic_similarity_high,
+            threshold_low=settings.context.topic_similarity_low,
         ) if settings.context.topic_detection_enabled else None,
     )
 
@@ -709,7 +710,8 @@ def chat(
         ) if settings.context.summary_enabled else None,
         topic_detector=TopicDetector(
             strategy=settings.context.topic_detection_strategy,
-            similarity_threshold=settings.context.topic_similarity_threshold,
+            threshold_high=settings.context.topic_similarity_high,
+            threshold_low=settings.context.topic_similarity_low,
         ) if settings.context.topic_detection_enabled else None,
     )
 

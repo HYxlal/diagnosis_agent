@@ -146,7 +146,7 @@ class Summarizer:
     def _create_llm(self):
         settings = get_settings()
         return create_llm(
-            model="qwen-turbo",
+            model=get_settings().llm.model,
             temperature=0.1,
             max_tokens=self.max_tokens,
         )

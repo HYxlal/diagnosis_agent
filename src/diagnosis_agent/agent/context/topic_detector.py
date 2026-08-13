@@ -29,8 +29,7 @@ from .types import ConversationContext, TopicSnapshot
 logger = logging.getLogger(__name__)
 
 # 阶段1：Embedding 相似度阈值
-THRESHOLD_SAME = 0.7       # ≥ 此值 → 同一话题
-THRESHOLD_DIFFERENT = 0.3  # ≤ 此值 → 话题切换
+# 阈值从 config.py / config.yaml 读取，在 _fast_check 中动态获取
 
 # 阶段2：LLM 精判 Prompt
 # Prompt 已提取到 prompts/topic_detector.py
@@ -51,16 +50,22 @@ class TopicDetector:
 
     Args:
         strategy: 检测策略 — "embedding+llm" | "embedding" | "llm" | "rule"
-        similarity_threshold: 阶段1 高阈值，默认 0.8
+        threshold_high: 阶段1 高阈值（≥此值判 same），默认 0.6
+        threshold_low: 阶段1 低阈值（≤此值判 diff），默认 0.27
+        model: LLM 模型名，默认跟随 settings.llm.model
     """
 
     def __init__(
         self,
         strategy: str = "embedding+llm",
-        similarity_threshold: float = 0.8,
+        threshold_high: float = 0.6,
+        threshold_low: float = 0.27,
+        model: str | None = None,
     ):
         self.strategy = strategy
-        self.similarity_threshold = similarity_threshold
+        self.threshold_high = threshold_high
+        self.threshold_low = threshold_low
+        self.model = model
         self._embedding = None
         self._last_query: str = ""
         self._last_embedding: list[float] | None = None
@@ -124,7 +129,7 @@ class TopicDetector:
         similarity = self._cosine_similarity(emb1, emb2)
         logger.info(f"话题相似度: {similarity:.4f}")
 
-        if similarity >= THRESHOLD_SAME:
+        if similarity >= self.threshold_high:
             return TopicDecision(
                 decision="same",
                 confidence=similarity,
@@ -132,7 +137,7 @@ class TopicDetector:
                 method="embedding",
             )
 
-        if similarity <= THRESHOLD_DIFFERENT:
+        if similarity <= self.threshold_low:
             return TopicDecision(
                 decision="different",
                 confidence=1.0 - similarity,
@@ -159,7 +164,7 @@ class TopicDetector:
 
         try:
             llm = create_llm(
-                model="qwen-turbo",
+                model=self.model or get_settings().llm.model,
                 temperature=0.1,
                 max_tokens=256,
             )

@@ -133,9 +133,10 @@ class ContextConfig(BaseModel):
     summary_strategy: str = "rule"      # 摘要策略: llm | rule | template
 
     # ── 话题检测配置 ──
-    topic_detection_enabled: bool = False      # 是否启用话题检测（Step 1 实现）
+    topic_detection_enabled: bool = False      # 是否启用话题检测
     topic_detection_strategy: str = "rule"     # 话题检测策略: embedding | llm | hybrid | rule
-    topic_similarity_threshold: float = 0.7    # 话题相似度阈值
+    topic_similarity_high: float = 0.6         # embedding 快筛高阈值（≥此值判 same）
+    topic_similarity_low: float = 0.27         # embedding 快筛低阈值（≤此值判 diff）
 
     # ── 生命周期配置 ──
     max_turns: int = 100                   # 最大保留轮次（超过后强制归档）

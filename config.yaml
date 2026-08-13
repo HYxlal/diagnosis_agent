@@ -8,7 +8,7 @@ app:
 
 # LLM 配置（阿里云通义千问 Qwen）
 llm:
-  model: "${LLM_MODEL_NAME:qwen-turbo}"
+  model: "qwen-flash"
   temperature: 0.3
   max_tokens: 4096
   api_key: "${DASHSCOPE_API_KEY}"
@@ -19,7 +19,7 @@ embedding:
   # provider: dashscope（默认，手写 requests，兼容阿里云百炼 input 格式）
   #           openai（走 langchain_openai，仅用于严格兼容 OpenAI tokenizer 的 API）
   provider: "${EMBEDDING_PROVIDER:dashscope}"
-  model: "${EMBEDDING_MODEL:text-embedding-v2}"
+  model: "text-embedding-v4"
   api_key: "${DASHSCOPE_API_KEY}"
   api_base: "${LLM_API_BASE:https://dashscope.aliyuncs.com/compatible-mode/v1}"
 
@@ -62,7 +62,7 @@ tools:
 # InputRouter 意图路由配置
 input_router:
   enabled: true              # 是否启用意图路由（关闭则所有输入走默认诊断流程）
-  model: "${INPUT_ROUTER_MODEL:qwen-turbo}"  # 意图分类用的轻量模型
+  model: "qwen-turbo"  # 意图分类用的轻量模型（已废弃，不再调 LLM）
   temperature: 0.1           # 低温度保证分类稳定性
 
 # Agent 配置

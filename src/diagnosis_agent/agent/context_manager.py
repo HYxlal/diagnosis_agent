@@ -338,15 +338,18 @@ class SimpleContextManager:
             # 步骤3: 仍超标 → 紧急截断（保留最近 2 轮 + 摘要）
             if token_usage > self.max_tokens:
                 messages = self._step3_emergency_truncate(messages)
-                if trim_info.step != "summarize":
-                    trim_info.step = "emergency"
+                trim_info.step = "emergency"
                 trim_info.trimmed_turns = self._count_rounds_dropped(messages, 0)
 
         # 最终裁剪
         result = self.prepare(messages)
-        # 合并 trim_info
-        if result.metadata.trim_info.step == "none":
-            result.metadata.trim_info = trim_info
+        # 合并 trim_info：优先保留 summarize/emergency 等非 trim 步骤
+        if trim_info.step != "none":
+            # 保留来自三步降级的步骤信息
+            if result.metadata.trim_info.step == "trim" and trim_info.step in ("summarize", "emergency"):
+                result.metadata.trim_info = trim_info
+            elif result.metadata.trim_info.step == "none":
+                result.metadata.trim_info = trim_info
 
         # 填充元数据
         result.metadata.session_id = ctx.session_id

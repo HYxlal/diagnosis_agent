@@ -235,11 +235,30 @@ class LangChainDiagnosticAgent:
                 parsed_input.bulk_records = convert_result["records"]
             parsed_input.intent = InputIntent.DIAGNOSTIC_QUERY
 
-        # 检索全部交给 Agent 工具执行，不在主流程做预检索。
-        # 原因：1) 预检索与话题检测的上下文裁剪冲突；
-        #       2) Agent 能根据当前上下文决定是否需要补充检索。
+        # ── 预检索：话题检测通过后，主流程做一轮语义检索 ──
+        # 结果直接注入 prompt，Agent 可看到相似工况，无需自己调工具
         similar_cases: list = []
         has_similar = False
+        score_threshold = self.settings.retrieval.semantic.score_threshold
+
+        try:
+            query = parsed_input.search_query or description
+            docs = self._retriever.semantic_search(query=query, top_k=5)
+            # score 已归一化到 [0,1]，越高越相似
+            similar_cases = [d for d in docs if d.metadata.get("score", 0) >= score_threshold]
+            has_similar = len(similar_cases) > 0
+            if has_similar:
+                logger.info(
+                    f"预检索: 找到 {len(similar_cases)} 条相似工况 "
+                    f"(阈值 {score_threshold})"
+                )
+            else:
+                logger.info(
+                    f"预检索: 未找到相似工况 "
+                    f"({len(docs)} 条均低于阈值 {score_threshold})"
+                )
+        except Exception as e:
+            logger.warning(f"预检索失败，Agent 将自主检索: {e}")
 
         reasoning_result, tool_calls, react_steps = self._run_agent(
             description=description,

@@ -26,22 +26,31 @@ def build_similar_case_prompt(
 
 {description}
 
-## 已检索到的相似工况
+## 预检索结果
 
 {similar_cases_text}
 
-请开始 ReAct 推理。先分析当前故障与相似工况的关系，然后调用工具进一步检索或查看详情，最后给出 Final Answer。"""
+请基于以上预检索结果优先进行诊断推理：
+1. 如果预检索结果内容充分且与当前故障高度相关，**直接**给出 Final Answer
+2. 如果预检索结果不充分、信息不足，**只允许**调用 `get_incident_detail` 查看某个特定工单的完整详情
+3. 只有在预检索结果明显偏离主题、无法支撑诊断时，才允许自行编辑检索词调用 `search_similar_incidents` 或 `query_fault_graph` 做补充检索
+4. 不要重复执行和当前预检索关键词相同的搜索
+
+完成以上任意一条路径后，给出 Final Answer。"""
 
 
 def build_no_similar_case_prompt(
     description: str,
 ) -> str:
-    """构建无预检索时的 user prompt（中性，不预设有无相似工况）"""
+    """构建无预检索时的 user prompt"""
     return f"""## 当前故障描述
 
 {description}
 
-请开始 ReAct 推理。先调用 search_similar_incidents 检索历史工单，分析检索结果与当前故障的关联，然后给出 Final Answer。"""
+## 预检索结果
+
+未找到相似历史工单。请先基于你的电驱系统专业知识进行诊断推理。
+如果认为仅靠领域知识不足以给出可信结论，**可以**自行编辑更精准的检索词调用 `search_similar_incidents` 或 `query_fault_graph` 做补充检索，然后给出 Final Answer。"""
 
 
 def format_similar_cases_for_prompt(cases: list) -> str:

@@ -30,13 +30,7 @@ def build_similar_case_prompt(
 
 {similar_cases_text}
 
-请基于以上预检索结果优先进行诊断推理：
-1. 如果预检索结果内容充分且与当前故障高度相关，**直接**给出 Final Answer
-2. 如果预检索结果不充分、信息不足，**只允许**调用 `get_incident_detail` 查看某个特定工单的完整详情
-3. 只有在预检索结果明显偏离主题、无法支撑诊断时，才允许自行编辑检索词调用 `search_similar_incidents` 或 `query_fault_graph` 做补充检索
-4. 不要重复执行和当前预检索关键词相同的搜索
-
-完成以上任意一条路径后，给出 Final Answer。"""
+请开始诊断。先分析预检索结果与当前故障的关联。如果预检索结果充分且与当前故障高度相关，足以支撑诊断，直接给出 Final Answer。如果预检索结果不足或内容偏离，可以自行编辑更精准的检索词调用 search_similar_incidents 或 query_fault_graph 进一步检索，或调用 get_incident_detail 查看某个特定工单的完整详情，再给出 Final Answer，但不要重复执行和当前预检索关键词相同的搜索。"""
 
 
 def build_no_similar_case_prompt(
@@ -49,8 +43,7 @@ def build_no_similar_case_prompt(
 
 ## 预检索结果
 
-未找到相似历史工单。请先基于你的电驱系统专业知识进行诊断推理。
-如果认为仅靠领域知识不足以给出可信结论，**可以**自行编辑更精准的检索词调用 `search_similar_incidents` 或 `query_fault_graph` 做补充检索，然后给出 Final Answer。"""
+预检索用户语句未能找到相似历史工单，如果觉得需要，可以自行编辑更精准的检索词调用 search_similar_incidents 或 query_fault_graph 补充检索，无论找到与否，都请基于你的专业领域知识进行诊断推理。"""
 
 
 def format_similar_cases_for_prompt(cases: list) -> str:

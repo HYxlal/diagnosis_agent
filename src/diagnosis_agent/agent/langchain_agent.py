@@ -36,6 +36,7 @@ from ..models.converter import (
 from ..models.diagnostic_output import (
     DiagnosticResult,
     OutputCode,
+    StandardDiagnosisResult,
     StandardOutput,
 )
 from ..models.diagnosis import (
@@ -76,10 +77,12 @@ class LangChainDiagnosticAgent:
 
     使用 ChromaVectorRetriever 做向量语义检索，LangChain create_agent 构建 Agent。
     支持预检索优化路径和 ReAct 步骤实时打印。
+    支持 report_mode 切换输出格式（默认轻量，--generate-md 完整）。
     """
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, report_mode: bool = False):
         self.settings = settings
+        self._report_mode = report_mode
         self._llm = self._init_llm()
         self._retriever = self._init_retriever()
         self._tools = DiagnosticTools(
@@ -448,9 +451,11 @@ class LangChainDiagnosticAgent:
         return reasoning_result, tool_calls, react_steps
 
     def _build_system_prompt(self) -> str:
-        """构建系统 prompt"""
-        from ..prompts.agent import AGENT_SYSTEM_PROMPT
-        return AGENT_SYSTEM_PROMPT
+        """构建系统 prompt — 按 report_mode 选择轻量/完整"""
+        from ..prompts.agent import AGENT_SYSTEM_PROMPT_LIGHTWEIGHT, AGENT_SYSTEM_PROMPT_FULL
+        if self._report_mode:
+            return AGENT_SYSTEM_PROMPT_FULL
+        return AGENT_SYSTEM_PROMPT_LIGHTWEIGHT
 
     def _extract_tool_calls(self, messages: list[BaseMessage]) -> list[ToolCallRecord]:
         """从消息列表中提取工具调用记录，关联 ToolMessage 结果
@@ -597,9 +602,10 @@ class LangChainDiagnosticAgent:
                     return self._get_default_result()
 
             from langchain_core.output_parsers import PydanticOutputParser
-            parser = PydanticOutputParser(pydantic_object=DiagnosticResult)
+            schema = DiagnosticResult if self._report_mode else StandardDiagnosisResult
+            parser = PydanticOutputParser(pydantic_object=schema)
             result = parser.parse(json.dumps(data, ensure_ascii=False))
-            return result.dict() if isinstance(result, DiagnosticResult) else result
+            return result.dict() if hasattr(result, 'dict') else result
 
         except (json.JSONDecodeError, TypeError, ValueError) as e:
             logger.error(f"解析最终结果失败: {e}")

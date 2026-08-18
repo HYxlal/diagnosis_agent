@@ -86,6 +86,7 @@ class StandardDiagnosisResult(BaseModel):
     """核心诊断结果（对外输出）
 
     严格按照需求文档定义的结构。
+    同时作为轻量模式下 LLM 输出约束的 Pydantic schema。
     """
     fault_root_cause: list[str] = Field(
         default_factory=list,
@@ -114,6 +115,16 @@ class StandardDiagnosisResult(BaseModel):
     similar_cases: str = Field(
         "",
         description="相似工况描述，如'历史案例XXX'",
+    )
+    confidence: float = Field(
+        0.3,
+        ge=0,
+        le=1,
+        description="诊断置信度 0.0-1.0",
+    )
+    reasoning_narrative: str = Field(
+        "",
+        description="完整的推断过程叙述",
     )
 
 

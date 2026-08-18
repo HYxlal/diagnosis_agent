@@ -279,7 +279,7 @@ def _run_standard_diagnosis(
         )
     else:
         try:
-            agent = LangChainDiagnosticAgent(settings=settings)
+            agent = LangChainDiagnosticAgent(settings=settings, report_mode=generate_md)
             standard_output = agent.diagnose_with_standard_input(
                 standard_input,
                 prepared_messages=prepared_result.messages if prepared_result else None,
@@ -366,7 +366,7 @@ def _run_traditional_diagnosis(
     console.print()
 
     try:
-        agent = LangChainDiagnosticAgent(settings=settings)
+        agent = LangChainDiagnosticAgent(settings=settings, report_mode=generate_md)
         output = agent.diagnose(parsed)
     except Exception as e:
         console.print(f"[red]诊断失败: {e}[/red]")
@@ -744,7 +744,7 @@ def chat(
     _print_model_status(settings)
 
     sess_id = session_id or f"chat-{uuid.uuid4().hex[:8]}"
-    agent = LangChainDiagnosticAgent(settings=settings)
+    agent = LangChainDiagnosticAgent(settings=settings, report_mode=generate_md)
     sm = SessionManager()
 
     console.print(f"  MCU: [cyan]{mcuid}[/cyan]")

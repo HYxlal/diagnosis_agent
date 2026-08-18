@@ -558,31 +558,39 @@ class LangChainDiagnosticAgent:
     def _enable_react_stream(self) -> None:
         """注册实时回调，流式打印 ReAct 每一步"""
         from rich.console import Console
-        from rich.panel import Panel
         from rich.syntax import Syntax
         console = Console()
 
+        def _format_content(content) -> str:
+            """安全地将消息内容转为可打印字符串"""
+            if content is None:
+                return ""
+            if isinstance(content, str):
+                return content
+            return json.dumps(content, ensure_ascii=False, indent=2)
+
         def _on_new_message(msg):
             """收到新消息时打印格式化输出"""
-            console.print()
             if isinstance(msg, AIMessage) and msg.tool_calls:
                 for i, tc in enumerate(msg.tool_calls, 1):
                     tool_name = tc.get("name", "")
                     args = tc.get("args", {})
-                    console.print(Panel.fit(f"[yellow]⚡ 调用工具 #{i} [/yellow] {tool_name}", style="bold yellow"))
+                    console.print(f"\n[bold yellow]── 调用工具 #{i}: {tool_name} ──[/bold yellow]")
                     if args:
                         console.print(Syntax(json.dumps(args, ensure_ascii=False, indent=2), "json", theme="default"))
             elif isinstance(msg, ToolMessage):
-                content = msg.content
-                console.print(Panel.fit("[green]📥 工具返回 [/green]", style="bold green"))
+                content = _format_content(msg.content)
+                console.print(f"\n[bold green]── 工具返回 ──[/bold green]")
                 try:
                     obj = json.loads(content) if isinstance(content, str) else content
                     console.print(Syntax(json.dumps(obj, ensure_ascii=False, indent=2), "json", theme="default"))
                 except (TypeError, ValueError, json.JSONDecodeError):
-                    console.print(str(content)[:2000])
-            elif isinstance(msg, AIMessage) and not msg.tool_calls and msg.content:
-                console.print(Panel.fit("[blue]💭 Agent 推理 [/blue]", style="bold blue"))
-                console.print(str(msg.content)[:2000])
+                    console.print(content[:3000])
+            elif isinstance(msg, AIMessage) and not msg.tool_calls:
+                content = _format_content(msg.content)
+                if content:
+                    console.print(f"\n[bold blue]── Agent 推理 ──[/bold blue]")
+                    console.print(content)
 
         self._stream_callback = _on_new_message
 

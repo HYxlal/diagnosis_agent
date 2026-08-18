@@ -279,7 +279,7 @@ def _run_standard_diagnosis(
         )
     else:
         try:
-            agent = LangChainDiagnosticAgent(settings=settings)
+            agent = LangChainDiagnosticAgent(settings=settings, verbose_react=verbose_react)
             standard_output = agent.diagnose_with_standard_input(
                 standard_input,
                 prepared_messages=prepared_result.messages if prepared_result else None,
@@ -366,7 +366,7 @@ def _run_traditional_diagnosis(
     console.print()
 
     try:
-        agent = LangChainDiagnosticAgent(settings=settings)
+        agent = LangChainDiagnosticAgent(settings=settings, verbose_react=verbose_react)
         output = agent.diagnose(parsed)
     except Exception as e:
         console.print(f"[red]诊断失败: {e}[/red]")
@@ -416,6 +416,7 @@ def diagnose(
     generate_md: bool = typer.Option(False, "--generate-md", "-g", help="生成Markdown报告（调试用）"),
     std_output: bool = typer.Option(False, "--std-output", help="输出标准JSON格式到控制台"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
+    verbose_react: bool = typer.Option(False, "--verbose-react", "-r", help="实时打印 ReAct 每一步（Thought/Action/Observation）"),
 ):
     """执行故障诊断
 
@@ -685,6 +686,7 @@ def chat(
     output_dir: Optional[str] = typer.Option(None, "--output", "-o", help="报告输出目录"),
     generate_md: bool = typer.Option(False, "--generate-md", "-g", help="每轮诊断后生成 Markdown 报告和 CSV/JSON 数据库条目"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
+    verbose_react: bool = typer.Option(False, "--verbose-react", "-r", help="实时打印 ReAct 每一步（Thought/Action/Observation）"),
 ):
     """交互式多轮诊断 — 进程常驻，持续接收问题，支持多轮追问
 
@@ -744,7 +746,7 @@ def chat(
     _print_model_status(settings)
 
     sess_id = session_id or f"chat-{uuid.uuid4().hex[:8]}"
-    agent = LangChainDiagnosticAgent(settings=settings)
+    agent = LangChainDiagnosticAgent(settings=settings, verbose_react=verbose_react)
     sm = SessionManager()
 
     console.print(f"  MCU: [cyan]{mcuid}[/cyan]")

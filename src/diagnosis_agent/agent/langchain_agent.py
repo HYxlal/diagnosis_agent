@@ -75,9 +75,10 @@ class LangChainDiagnosticAgent:
     """基于 LangChain 最新架构的诊断 Agent
 
     使用 ChromaVectorRetriever 做向量语义检索，LangChain create_agent 构建 Agent。
+    支持预检索优化路径和 ReAct 步骤实时打印。
     """
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, verbose_react: bool = False):
         self.settings = settings
         self._llm = self._init_llm()
         self._retriever = self._init_retriever()
@@ -92,7 +93,9 @@ class LangChainDiagnosticAgent:
             emergency_min_turns=settings.context.emergency_min_turns,
         )
         self._last_diagnostic_output: Optional[DiagnosticOutput] = None
-        self._stream_callback = None  # 实时回调，打印 ReAct 步骤
+        self._verbose_react = verbose_react
+        if self._verbose_react:
+            self._enable_react_stream()
 
     def _build_agent(self):
         """构建并缓存 Agent"""
@@ -548,6 +551,37 @@ class LangChainDiagnosticAgent:
                     pending_step = None
 
         return steps
+
+    def _enable_react_stream(self) -> None:
+        """注册实时回调，流式打印 ReAct 每一步"""
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.syntax import Syntax
+        console = Console()
+
+        def _on_new_message(msg):
+            """收到新消息时打印格式化输出"""
+            console.print()
+            if isinstance(msg, AIMessage) and msg.tool_calls:
+                for i, tc in enumerate(msg.tool_calls, 1):
+                    tool_name = tc.get("name", "")
+                    args = tc.get("args", {})
+                    console.print(Panel.fit(f"[yellow]⚡ 调用工具 #{i} [/yellow] {tool_name}", style="bold yellow"))
+                    if args:
+                        console.print(Syntax(json.dumps(args, ensure_ascii=False, indent=2), "json", theme="default"))
+            elif isinstance(msg, ToolMessage):
+                content = msg.content
+                console.print(Panel.fit("[green]📥 工具返回 [/green]", style="bold green"))
+                try:
+                    obj = json.loads(content) if isinstance(content, str) else content
+                    console.print(Syntax(json.dumps(obj, ensure_ascii=False, indent=2), "json", theme="default"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    console.print(str(content)[:500])
+            elif isinstance(msg, AIMessage) and not msg.tool_calls and msg.content:
+                console.print(Panel.fit("[blue]💭 Agent 推理 [/blue]", style="bold blue"))
+                console.print(str(msg.content)[:500])
+
+        self._stream_callback = _on_new_message
 
     def _parse_final_result(self, last_message) -> dict:
         """解析最终结果，使用 PydanticOutputParser 验证"""

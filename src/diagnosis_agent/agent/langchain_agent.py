@@ -78,7 +78,7 @@ class LangChainDiagnosticAgent:
     支持预检索优化路径和 ReAct 步骤实时打印。
     """
 
-    def __init__(self, settings: Settings, verbose_react: bool = False):
+    def __init__(self, settings: Settings):
         self.settings = settings
         self._llm = self._init_llm()
         self._retriever = self._init_retriever()
@@ -93,9 +93,7 @@ class LangChainDiagnosticAgent:
             emergency_min_turns=settings.context.emergency_min_turns,
         )
         self._last_diagnostic_output: Optional[DiagnosticOutput] = None
-        self._verbose_react = verbose_react
-        if self._verbose_react:
-            self._enable_react_stream()
+        self._enable_react_stream()
 
     def _build_agent(self):
         """构建并缓存 Agent"""

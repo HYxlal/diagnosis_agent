@@ -7,9 +7,6 @@ from .summarizer import (
     SUMMARY_SYSTEM_PROMPT,
     SUMMARY_MERGE_PROMPT,
 )
-from .topic_detector import (
-    TOPIC_JUDGE_PROMPT,
-)
 from .agent import (
     AGENT_SYSTEM_PROMPT,
 )
@@ -17,6 +14,5 @@ from .agent import (
 __all__ = [
     "SUMMARY_SYSTEM_PROMPT",
     "SUMMARY_MERGE_PROMPT",
-    "TOPIC_JUDGE_PROMPT",
     "AGENT_SYSTEM_PROMPT",
 ]

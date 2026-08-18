@@ -19,20 +19,9 @@ class InputType(str, Enum):
 
 
 class InputIntent(str, Enum):
-    """输入意图枚举（由 InputRouter 分类）
-
-    用于决定是否执行预检索：
-    - DIAGNOSTIC_QUERY: 故障描述，需要预检索相似工况
-    - INSTRUCTION: 对 LLM 的操作指令，跳过预检索
-    - SUPPLEMENT: 信息补充，跳过预检索，作为上下文注入
-    - WORKING_CONDITION_FILE: 工况文件，需先调用转换工具再重新路由
-    - OUT_OF_SCOPE: 非电驱系统问题，不执行诊断
-    """
+    """输入意图枚举（由 InputRouter 静态路由分类）"""
     DIAGNOSTIC_QUERY = "diagnostic_query"
-    INSTRUCTION = "instruction"
-    SUPPLEMENT = "supplement"
     WORKING_CONDITION_FILE = "working_condition_file"
-    OUT_OF_SCOPE = "out_of_scope"
 
 
 # ---------------------------------------------------------------------------

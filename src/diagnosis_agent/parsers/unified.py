@@ -11,31 +11,10 @@ from typing import Optional
 
 from ..models.input import InputType, ParsedInput
 from .csv_parser import parse_csv
-from .nl_parser import parse_mixed, parse_natural_language
+from .nl_parser import parse_natural_language
 from .xlsx_parser import parse_xlsx
 
 _WORKING_CONDITION_EXTENSIONS = {".asc", ".blf", ".mdf"}
-
-
-def detect_input_type(text: str, file_path: Optional[str] = None) -> InputType:
-    """自动检测输入类型
-
-    Args:
-        text: 输入文本
-        file_path: 可选的文件路径
-
-    Returns:
-        InputType 枚举
-    """
-    if file_path:
-        ext = Path(file_path).suffix.lower()
-        if ext == ".xlsx" or ext == ".xls":
-            return InputType.XLSX
-        elif ext == ".csv":
-            return InputType.CSV
-
-    # 如果没有文件，纯文本
-    return InputType.NATURAL_LANGUAGE
 
 
 def parse_input(

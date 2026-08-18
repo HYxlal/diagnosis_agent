@@ -28,25 +28,3 @@ def parse_natural_language(text: str) -> ParsedInput:
         description=text,
         raw_input=text,
     )
-
-
-def parse_mixed(
-    text: str,
-) -> ParsedInput:
-    """解析混合输入：自然语言 + 文件内容
-
-    统一走自然语言路径，不再提取结构化字段。
-
-    Args:
-        text: 自然语言描述
-
-    Returns:
-        ParsedInput 实例
-    """
-    text = text.strip()
-
-    return ParsedInput(
-        input_type=InputType.MIXED,
-        description=text,
-        raw_input=text,
-    )

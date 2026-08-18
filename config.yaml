@@ -2,10 +2,6 @@
 # diagnosis_agent 配置文件
 # ============================================
 
-app:
-  name: "diagnosis_agent"
-  version: "0.1.0"
-
 # LLM 配置（阿里云通义千问 Qwen）
 llm:
   model: "qwen3.7-max"
@@ -16,8 +12,6 @@ llm:
 
 # Embedding 配置（阿里云通义千问 Embedding）
 embedding:
-  # provider: dashscope（默认，手写 requests，兼容阿里云百炼 input 格式）
-  #           openai（走 langchain_openai，仅用于严格兼容 OpenAI tokenizer 的 API）
   provider: "${EMBEDDING_PROVIDER:dashscope}"
   model: "text-embedding-v4"
   api_key: "${DASHSCOPE_API_KEY}"
@@ -25,87 +19,51 @@ embedding:
 
 # 向量数据库配置
 vector_store:
-  type: "chroma"              # 目前支持 chroma
-  persist_dir: "data/chroma"  # ChromaDB 持久化目录
+  type: "chroma"
+  persist_dir: "data/chroma"
   collection_name: "incidents"
 
 # 检索配置
 retrieval:
-  # 检索策略：
-  # - chroma_only : 只用 Chroma 语义检索（最快，不依赖 Neo4j）
-  # - neo4j_first: Neo4j 结构化召回 + Embedding 精排，不足时走 Chroma 兜底
-  # - hybrid     : 两段式全开（Neo4j 召回 + 精排 + Chroma 兜底）
   strategy: "chroma_only"
   semantic:
-    top_k: 5                 # 语义检索返回数量
-    score_threshold: 0.3     # 相似度阈值（低于此值不返回）
-  filter:
-    default_top_k: 10
-    # 可配置的过滤字段列表 — filter_by() 接受这些字段的任意组合
-    # 新增过滤字段只需在此列表追加即可，无需改代码
-    filter_fields:
-      - vehicle_type
-      - drive_code
-      - dtc_code
-      - dashboard_indicator
-      - fault_scenario
+    top_k: 5
+    score_threshold: 0.3
+  # 两段式检索权重融合（预留，待实现）
   hybrid:
-    semantic_weight: 0.7     # 语义检索权重
-    filter_weight: 0.3       # 精确过滤权重
-    filter_expansion_ratio: 2  # 过滤检索扩倍率（filter_top_k = top_k * 此值）
+    semantic_weight: 0.7
+    filter_weight: 0.3
+    filter_expansion_ratio: 2
 
 # Agent 工具默认参数
 tools:
-  search_top_k: 5            # search_similar_incidents 默认返回数量
-  filter_top_k: 10           # filter_by_vehicle_type 默认返回数量
+  search_top_k: 5
 
-# InputRouter 意图路由配置
-input_router:
-  enabled: true              # 是否启用意图路由（关闭则所有输入走默认诊断流程）
-  model: "qwen-turbo"  # 意图分类用的轻量模型（已废弃，不再调 LLM）
-  temperature: 0.1           # 低温度保证分类稳定性
-
-# Agent 配置
-agent:
-  max_iterations: 10         # ReAct 最大迭代次数
-  verbose: true
-  # 有相似工况时的阈值：相似度 >= 此值走"有相似工况"路径
-  similarity_threshold: 0.65
-
-# 报告配置
+# 报告输出目录
 report:
-  output_dir: "output"       # 报告输出目录
-  markdown_template: "default"
-
-# 路径配置
-paths:
-  data_dir: "data"
-  samples_dir: "data/samples"
   output_dir: "output"
 
 # 上下文管理配置（分层记忆：热/温/冷）
 context:
   # ── Token 预算 ──
-  max_tokens: 8000     # 消息列表 token 预算上限
+  max_tokens: 8000
 
   # ── 热层配置 ──
-  window_size: 15       # 热层窗口大小（轮次），保留最近 N 轮完整消息
+  window_size: 15
 
   # ── 温层配置 ──
-  summary_enabled: true        # 是否启用摘要（Step 1 实现）
-  summary_max_tokens: 500      # 摘要最大 token 数
-  summary_strategy: "llm"      # 摘要策略: llm | rule | template
+  summary_enabled: true
+  summary_max_tokens: 500
+  summary_strategy: "llm"
 
   # ── 话题检测配置 ──
-  topic_detection_enabled: true      # 是否启用话题检测
-  topic_detection_strategy: "embedding+llm"    # 话题检测策略: embedding | llm | hybrid | rule
-  topic_detection_model: ""        # 话题检测 LLM 模型，空则使用主 LLM
-  topic_similarity_high: 0.6         # embedding 快筛高阈值（≥此值判 same）
-  topic_similarity_low: 0.27         # embedding 快筛低阈值（≤此值判 diff）
+  topic_detection_enabled: true
+  topic_detection_strategy: "embedding+llm"
+  topic_detection_model: ""
+  topic_similarity_high: 0.6
+  topic_similarity_low: 0.27
 
   # ── 话题检测信号词 ──
-  # switch: 检测到直接判 different（用户明确切换话题）
-  # continue: 暂不启用（默认空列表）
   topic_signal_words:
     switch:
       - "换一个问题"
@@ -118,22 +76,17 @@ context:
     continue: []
 
   # ── 实体重叠检测 ──
-  # 用 ctx.current_topic.key_entities 与 query 做字符串匹配
   entity_overlap_enabled: true
 
   # ── 时间衰减检测 ──
-  # 短间隔（<30s）+ 短消息（<20字）→ 判延续
-  # 长间隔（>30min）→ 判可能切换
   topic_time_decay_enabled: true
   topic_time_decay_short_sec: 30
   topic_time_decay_short_max_len: 10
   topic_time_decay_long_sec: 1800
 
   # ── 领域范围检测（scope） ──
-  # 首轮 + 话题切换后，判断是否在电驱诊断范围内
-  # 只做 out 关键词快速排除，不做 in 关键词判断（太粗糙）
   scope_detection_enabled: true
-  scope_use_llm: true               # 关键词无法判断时，用 LLM 精判
+  scope_use_llm: true
   scope_out_keywords:
     - 电池包
     - 充电桩
@@ -152,24 +105,17 @@ context:
     - 快递
 
   # ── 摘要配置 ──
-  summary_model: ""                 # 摘要 LLM 模型，空则使用主 LLM
+  summary_model: ""
 
   # ── 生命周期配置 ──
-  max_turns: 100                   # 最大保留轮次（超过后强制归档）
-  session_idle_timeout: 3600       # 会话空闲超时（秒），超时后自动归档到冷层
-  session_max_lifetime: 86400      # 会话最大存活时间（秒）
-  chat_idle_timeout: 1800           # chat 聊天空闲超时（秒），超时后自动退出交互模式
+  session_idle_timeout: 3600
+  session_max_lifetime: 86400
+  chat_idle_timeout: 1800
+  emergency_min_turns: 2
 
-  # ── 缓存配置 ──
-  cache_context_window: 15          # 缓存上下文窗口大小
-
-  # ── 降级配置 ──
-  emergency_min_turns: 2           # 紧急截断时保留的最小轮次
-  degradation_logging: true        # 是否启用降级日志
-
-  # ── Redis 存储配置（热层/温层持久化） ──
+  # ── Redis 存储配置 ──
   redis:
-    enabled: true                   # 是否启用 Redis 存储（需先启动 Redis 实例）
+    enabled: true
     url: "redis://localhost:6379/0"
     key_prefix: "session:"
 
@@ -178,6 +124,6 @@ neo4j:
   url: "${NEO4J_URI:bolt://localhost:7687}"
   user: "${NEO4J_USER:neo4j}"
   password: "${NEO4J_PASSWORD:}"
-  min_candidates: 3             # Neo4j 召回少于此数 → 触发 Chroma 兜底
-  default_depth: 1             # 默认关系扩展深度（1=直接关系，2=两度关系）
-  fallback_to_chroma: true     # Neo4j 不可用时是否降级到 Chroma 语义检索
+  min_candidates: 3
+  default_depth: 1
+  fallback_to_chroma: true

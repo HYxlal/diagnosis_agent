@@ -127,7 +127,3 @@ class FieldExtractor:
             )
 
 
-def extract_fields(text: str) -> IncidentRecord:
-    """便捷函数：提取字段"""
-    extractor = FieldExtractor()
-    return extractor.extract(text)

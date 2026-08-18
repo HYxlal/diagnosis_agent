@@ -90,13 +90,6 @@ def _print_model_status(settings: Settings) -> None:
     emb_note = "向量编码模型" if emb_key_set else "回退到 ChromaDB 默认 embedding"
     table.add_row("Embedding", settings.embedding.model, emb_status, emb_note)
 
-    if settings.input_router.enabled:
-        router_status = "[green]✅ 已启用[/green]" if llm_key_set else "[yellow]⚠️ 回退模式[/yellow]"
-        router_note = "轻量意图分类" if llm_key_set else "LLM 不可用，使用规则匹配"
-        table.add_row("InputRouter", settings.input_router.model, router_status, router_note)
-    else:
-        table.add_row("InputRouter", settings.input_router.model, "[dim]⏸️ 已禁用[/dim]", "所有输入走默认诊断流程")
-
     table.add_row("向量存储", settings.vector_store.type, "[blue]📦 本地[/blue]", f"集合: {settings.vector_store.collection_name}")
 
     console.print(table)
@@ -260,6 +253,7 @@ def _run_standard_diagnosis(
             scope_use_llm=settings.context.scope_use_llm,
             scope_out_keywords=settings.context.scope_out_keywords,
         ) if settings.context.topic_detection_enabled else None,
+        emergency_min_turns=settings.context.emergency_min_turns,
     )
 
     # 构建多轮上下文（三步降级 + 摘要注入）
@@ -418,7 +412,7 @@ def diagnose(
     file: Optional[List[str]] = typer.Option(None, "--file", "-f", help="输入文件路径 (CSV/XLSX)，支持多个文件"),
     files: Optional[str] = typer.Option(None, "--files", help="包含多个文件的目录路径"),
     json_input: Optional[str] = typer.Option(None, "--json-input", help="标准输入JSON文件路径（平台Agent传入的格式）"),
-    output_dir: str = typer.Option("output", "--output", "-o", help="报告输出目录"),
+    output_dir: Optional[str] = typer.Option(None, "--output", "-o", help="报告输出目录"),
     generate_md: bool = typer.Option(False, "--generate-md", "-g", help="生成Markdown报告（调试用）"),
     std_output: bool = typer.Option(False, "--std-output", help="输出标准JSON格式到控制台"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
@@ -436,6 +430,7 @@ def diagnose(
     _setup_logging(verbose)
     reset_settings()
     settings = get_settings()
+    output_dir = output_dir or settings.report.output_dir
 
     console.print(Panel.fit("🔍 故障诊断 Agent", style="bold blue"))
     _print_model_status(settings)
@@ -521,7 +516,7 @@ def load_data(
     console.print(Panel.fit("📥 数据加载", style="bold blue"))
     _print_model_status(settings)
 
-    default_path = Path(settings.paths.samples_dir)
+    default_path = Path("data/samples")
 
     all_files: List[Path] = []
     if file:
@@ -674,13 +669,10 @@ def config():
 
     rt_table.add_row("语义 top_k", str(settings.retrieval.semantic.top_k))
     rt_table.add_row("语义阈值", str(settings.retrieval.semantic.score_threshold))
-    rt_table.add_row("过滤 default_top_k", str(settings.retrieval.filter.default_top_k))
-    rt_table.add_row("过滤字段", ", ".join(settings.retrieval.filter.filter_fields))
     rt_table.add_row("语义权重", str(settings.retrieval.hybrid.semantic_weight))
     rt_table.add_row("过滤权重", str(settings.retrieval.hybrid.filter_weight))
     rt_table.add_row("过滤扩倍率", str(settings.retrieval.hybrid.filter_expansion_ratio))
     rt_table.add_row("工具 search_top_k", str(settings.tools.search_top_k))
-    rt_table.add_row("工具 filter_top_k", str(settings.tools.filter_top_k))
 
     console.print(rt_table)
 
@@ -690,7 +682,7 @@ def chat(
     initial_question: Optional[str] = typer.Argument(None, help="初始问题（可选，不传则交互式输入）"),
     mcuid: str = typer.Option("CLI", "--mcuid", "-m", help="MCU 标识（可选，默认 CLI）"),
     session_id: Optional[str] = typer.Option(None, "--session", "-s", help="会话ID（可选，不填自动生成）"),
-    output_dir: str = typer.Option("output", "--output", "-o", help="报告输出目录"),
+    output_dir: Optional[str] = typer.Option(None, "--output", "-o", help="报告输出目录"),
     generate_md: bool = typer.Option(False, "--generate-md", "-g", help="每轮诊断后生成 Markdown 报告和 CSV/JSON 数据库条目"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
 ):
@@ -715,6 +707,7 @@ def chat(
     _setup_logging(verbose)
     reset_settings()
     settings = get_settings()
+    output_dir = output_dir or settings.report.output_dir
     from .agent.session_manager import SessionManager
     from .agent.langchain_agent import LangChainDiagnosticAgent
     from .agent.context_manager import SimpleContextManager
@@ -744,6 +737,7 @@ def chat(
             scope_use_llm=settings.context.scope_use_llm,
             scope_out_keywords=settings.context.scope_out_keywords,
         ) if settings.context.topic_detection_enabled else None,
+        emergency_min_turns=settings.context.emergency_min_turns,
     )
 
     console.print(Panel.fit("🔍 故障诊断 Agent — 交互模式", style="bold blue"))

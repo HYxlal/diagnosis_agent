@@ -172,12 +172,14 @@ class SimpleContextManager:
         summarizer=None,
         topic_detector=None,
         async_mode: bool = False,
+        emergency_min_turns: int = 2,
     ):
         self.window_size = window_size
         self.max_tokens = max_tokens
         self.summarizer = summarizer
         self.topic_detector = topic_detector
         self.async_mode = async_mode
+        self.emergency_min_turns = emergency_min_turns
 
     def prepare(self, messages: list) -> PrepareResult:
         """裁剪消息到预算内，返回 PrepareResult
@@ -460,23 +462,24 @@ class SimpleContextManager:
     def _step3_emergency_truncate(self, messages: list) -> list:
         """步骤3: 紧急截断
 
-        保留最近 2 轮 + 摘要 SystemMessage。
+        保留最近 emergency_min_turns 轮 + 摘要 SystemMessage。
         这是最后兜底，确保不超 token 预算。
         """
-        logger.warning("步骤3: 紧急截断 — 仅保留最近 2 轮")
+        min_turns = self.emergency_min_turns
+        logger.warning(f"步骤3: 紧急截断 — 仅保留最近 {min_turns} 轮")
 
         boundaries = _find_round_boundaries(messages)
-        if len(boundaries) <= 2:
+        if len(boundaries) <= min_turns:
             return messages
 
-        # 保留 SystemMessage（摘要） + 最近 2 轮
+        # 保留 SystemMessage（摘要） + 最近 min_turns 轮
         result = []
         for msg in messages:
             if isinstance(msg, SystemMessage):
                 result.append(msg)
                 break
 
-        keep_from = boundaries[-2] if len(boundaries) >= 2 else boundaries[0]
+        keep_from = boundaries[-min_turns] if len(boundaries) >= min_turns else boundaries[0]
         result.extend(messages[keep_from:])
         return result
 
@@ -713,6 +716,7 @@ class AsyncContextManager(SimpleContextManager):
         topic_detector=None,
         session_manager=None,
         max_workers: int = 2,
+        emergency_min_turns: int = 2,
     ):
         super().__init__(
             window_size=window_size,
@@ -720,6 +724,7 @@ class AsyncContextManager(SimpleContextManager):
             summarizer=summarizer,
             topic_detector=topic_detector,
             async_mode=True,
+            emergency_min_turns=emergency_min_turns,
         )
         self._session_manager = session_manager
         self._executor = ThreadPoolExecutor(

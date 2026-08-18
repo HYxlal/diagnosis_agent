@@ -89,6 +89,7 @@ class LangChainDiagnosticAgent:
         self._context_manager = SimpleContextManager(
             window_size=settings.context.window_size,
             max_tokens=settings.context.max_tokens,
+            emergency_min_turns=settings.context.emergency_min_turns,
         )
         self._last_diagnostic_output: Optional[DiagnosticOutput] = None
         self._stream_callback = None  # 实时回调，打印 ReAct 步骤

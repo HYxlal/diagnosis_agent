@@ -8,7 +8,7 @@ app:
 
 # LLM 配置（阿里云通义千问 Qwen）
 llm:
-  model: "qwen-flash"
+  model: "qwen3.7-max"
   temperature: 0.3
   max_tokens: 4096
   api_key: "${DASHSCOPE_API_KEY}"
@@ -35,7 +35,7 @@ retrieval:
   # - chroma_only : 只用 Chroma 语义检索（最快，不依赖 Neo4j）
   # - neo4j_first: Neo4j 结构化召回 + Embedding 精排，不足时走 Chroma 兜底
   # - hybrid     : 两段式全开（Neo4j 召回 + 精排 + Chroma 兜底）
-  strategy: "neo4j_first"
+  strategy: "chroma_only"
   semantic:
     top_k: 5                 # 语义检索返回数量
     score_threshold: 0.3     # 相似度阈值（低于此值不返回）
@@ -89,7 +89,7 @@ context:
   max_tokens: 8000     # 消息列表 token 预算上限
 
   # ── 热层配置 ──
-  window_size: 5       # 热层窗口大小（轮次），保留最近 N 轮完整消息
+  window_size: 15       # 热层窗口大小（轮次），保留最近 N 轮完整消息
 
   # ── 温层配置 ──
   summary_enabled: true        # 是否启用摘要（Step 1 实现）
@@ -156,15 +156,22 @@ context:
 
   # ── 生命周期配置 ──
   max_turns: 100                   # 最大保留轮次（超过后强制归档）
-  session_idle_timeout: 3600       # 会话空闲超时（秒）
+  session_idle_timeout: 3600       # 会话空闲超时（秒），超时后自动归档到冷层
   session_max_lifetime: 86400      # 会话最大存活时间（秒）
+  chat_idle_timeout: 1800           # chat 聊天空闲超时（秒），超时后自动退出交互模式
 
   # ── 缓存配置 ──
-  cache_context_window: 3          # 缓存上下文窗口大小
+  cache_context_window: 15          # 缓存上下文窗口大小
 
   # ── 降级配置 ──
-  emergency_min_turns: 1           # 紧急截断时保留的最小轮次
+  emergency_min_turns: 2           # 紧急截断时保留的最小轮次
   degradation_logging: true        # 是否启用降级日志
+
+  # ── Redis 存储配置（热层/温层持久化） ──
+  redis:
+    enabled: true                   # 是否启用 Redis 存储（需先启动 Redis 实例）
+    url: "redis://localhost:6379/0"
+    key_prefix: "session:"
 
 # Neo4j 故障知识图谱配置
 neo4j:

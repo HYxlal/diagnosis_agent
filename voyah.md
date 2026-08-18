@@ -57,7 +57,13 @@ pytest tests/test_parsers.py::test_parse_csv -v   # 单个测试
 - **`storage/chroma_store.py`** —— `ChromaVectorStore`（ChromaDB `PersistentClient`，cosine 空间）。有 API key 时用 `OpenAIEmbeddingFunction`，否则用 ChromaDB 默认 embedding（`all-MiniLM-L6-v2`）。批量添加限制 25 条（embedding API 约束）。`filter()` 做纯 metadata `where` 查询（不走 embedding 路径）。
 - **`models/`** —— Pydantic 模型。**`incident.py`** 含 `IncidentRecord` + 标准 8 列列表（`INCIDENT_COLUMNS`）+ `COLUMN_CN_MAP`（中文→英文表头映射）。**`input.py`** 含 `StandardInput`/`StandardEntities`/`ParsedInput`/`InputIntent`。**`diagnostic_output.py`** 含对外模型 `StandardOutput`/`OutputCode`/`StandardDiagnosisResult`。**`diagnosis.py`** 含内部模型 `DiagnosticOutput`/`DiagnosticReport`/`DatabaseEntry`。**`converter.py`** 桥接两侧（标准↔内部）。
 - **`reporting/`** —— `markdown.py`（人类报告）和 `entries.py`（CSV/JSON 数据库条目；`similar_record_ids` 不会写入输出文件）。
-- **`config.py`** —— `Settings` Pydantic 模型，`get_settings()` 全局单例，`reset_settings()` 供测试用。
+- **`config.py`** —— `Settings` Pydantic 模型，`get_settings()` 全局单例，`reset_settings()` 供测试用。新增 `RedisConfig` 子模型（热层/温层持久化配置）。
+- **`agent/session_manager.py`** —— `SessionManager`（单例）+ `SessionRedisStore`。三层存储：Redis 热层/温层 + 磁盘冷层。状态机 created→active→idle→closing→archived。Redis 不可用时自动降级内存。
+- **`agent/context_manager.py`** —— `SimpleContextManager`（同步裁剪）+ `AsyncContextManager`（异步摘要）。`async_mode` 标志控制是否阻塞摘要生成。`ThreadPoolExecutor` 后台线程执行摘要，`asyncio` 协程编排回调。
+- **`agent/context/types.py`** —— `ConversationContext` 增加 `status` 字段（状态机）。`TrimInfo` 增加 `needs_summary` / `summarized_start` 标记。
+- **`agent/context/summarizer.py`** —— 温层摘要生成器，LLM 或模板策略。`summarize()` 和 `merge_summaries()` 同步方法，被 `AsyncContextManager` 在后台线程中调用。`ConversationContext` 含 `status` 字段。
+
+### 标准 I/O 契约（对接关键）
 
 ### 标准 I/O 契约（对接关键）
 
@@ -87,7 +93,8 @@ pytest tests/test_parsers.py::test_parse_csv -v   # 单个测试
 
 ## 行为准则
 
-1. **编码前先思考。** 明确陈述假设；若存在多种解读，呈现出来而非默默选择其一。遇到不清晰的地方，停下来询问。
-2. **简洁优先。** 用解决问题的最少代码。不做投机性抽象、多余配置、为不可能场景做错误处理。200 行能压到 50 行就重写。
-3. **手术刀式修改。** 只动任务要求的部分。匹配既有风格。不重构相邻代码、不删除既有死代码（除非被要求）—— 发现问题改为口头提示。
-4. **目标驱动执行。** 将任务转化为可验证的目标（如"修 bug"→"写一个复现 bug 的测试，再让它通过"）。多步骤任务先给出简短计划，每步附验证方式。
+1. **全程中文。** 所有输出、交互、注释、内部推理（thinking/思维链）必须使用中文。技术标识符（变量名、函数名、类型名、框架名等）保持原文，但自然语言部分必须全部为中文。在每次思考前必须先提醒自己思维链用中文
+2. **编码前先思考。** 明确陈述假设；若存在多种解读，呈现出来而非默默选择其一。遇到不清晰的地方，停下来询问。
+3. **简洁优先。** 用解决问题的最少代码。不做投机性抽象、多余配置、为不可能场景做错误处理。200 行能压到 50 行就重写。
+4. **手术刀式修改。** 只动任务要求的部分。匹配既有风格。不重构相邻代码、不删除既有死代码（除非被要求）—— 发现问题改为口头提示。
+5. **目标驱动执行。** 将任务转化为可验证的目标（如"修 bug"→"写一个复现 bug 的测试，再让它通过"）。多步骤任务先给出简短计划，每步附验证方式。

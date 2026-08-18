@@ -15,7 +15,11 @@
 - [第六章 Chain-of-Thought 推理](#第六章-chain-of-thought-推理)
 - [第七章 双层输出设计](#第七章-双层输出设计)
 - [第八章 模块串联与主流程](#第八章-模块串联与主流程)
+- [第九章 会话生命周期与状态机](#第九章-会话生命周期与状态机)
+- [第十章 Redis 会话存储](#第十章-redis-会话存储)
+- [第十一章 异步摘要生成](#第十一章-异步摘要生成)
 - [附录 推荐学习资源](#附录-推荐学习资源)
+- [附录：新增 CLI 命令](#附录新增-cli-命令)
 
 ---
 
@@ -31,7 +35,10 @@
   ├─ 5. ReAct Agent ──→ 纯 LLM 推理框架               │
   ├─ 6. CoT 推理 ─────→ 思维链 Prompt 设计            │
   ├─ 7. 双层输出 ─────→ 报告+条目的设计模式            │
-  └─ 8. 主流程 ───────→ CLI 编排与配置管理            │
+  ├─ 8. 主流程 ───────→ CLI 编排与配置管理            │
+  ├─ 9. 会话生命周期 ──→ 状态机 + Redis 存储          │
+  ├─ 10. Redis 存储 ───→ 热层/温层持久化              │
+  └─ 11. 异步摘要 ────→ 后台线程不阻塞诊断            │
                                                        |
                                              实战项目 ←
 ```
@@ -1695,13 +1702,426 @@ def _retrieve_similar_cases(self, parsed_input):
 | 6. CoT | 思维链推理 | 让推理过程显式、可追溯 | `agent/prompts.py` |
 | 7. 双层输出 | 报告+条目 | 同时服务人和机器 | `reporting/markdown.py`, `reporting/entries.py` |
 | 8. 主流程 | CLI 编排与配置 | Pipeline 编排全链路 | `cli.py`, `config.py` |
+| 9. 会话生命周期 | 状态机 + Redis 存储 | 多轮对话上下文持久化 | `session_manager.py`, `context/types.py` |
+| 10. 异步摘要 | asyncio + ThreadPoolExecutor | 摘要不阻塞诊断主流程 | `context_manager.py` (AsyncContextManager) |
 
-**学完这八章，你就理解了 Diagnosis Agent 的每一个组件。** 接下来建议：
+**学完这十章，你就理解了 Diagnosis Agent 的每一个组件。** 接下来建议：
 1. 阅读项目源码，对照每章找到对应实现
 2. 尝试修改一个模块（如添加新的检索工具、扩展表头映射字典）
 3. 用自己的数据跑一遍完整流程：`load-data` → `diagnose`
 4. 自己设计一个类似的双层输出 Agent 项目
 
 ---
+## 第九章 会话生命周期与状态机
 
-*文档版本: 2.0 | 最后更新: 2026-07-22 | 对应代码版本: diagnosis_agent v0.1.0*
+### 9.1 为什么需要会话管理？
+
+多轮对话场景中，每次 LLM 调用都是独立的。如果没有会话管理，Agent 会"忘记"上一轮说了什么：
+
+```
+# 第一轮
+用户：电机抖动是什么原因？
+Agent：可能是相电流不平衡...
+
+# 第二轮（没有会话上下文）
+用户：换了一个MCU还是报错
+Agent：？？？你在说什么MCU？
+```
+
+**会话管理器**的职责就是把历史消息保存下来，在下一次调用时拼入 messages 列表，让 Agent 感知上下文。
+
+### 9.2 会话状态机
+
+本项目的会话有 6 个状态：
+
+```
+状态机：created → active → idle → closing → archived（+ error）
+```
+
+| 状态 | 含义 | 触发条件 |
+|------|------|---------|
+| `created` | 刚创建，无任何消息 | `_create_new()` |
+| `active` | 活跃对话中 | 首次 `update()` |
+| `idle` | 空闲超时 | Redis TTL 过期 |
+| `closing` | 正在归档 | `archive()` 调用 |
+| `archived` | 已归档到冷层 | 归档完成 |
+| `error` | 异常状态 | 任意异常 |
+
+### 9.3 代码实现：`ConversationContext`
+
+```python
+@dataclass
+class ConversationContext:
+    session_id: str = ""
+    status: str = "created"  # ← 核心：状态字段
+    hot_messages: list[dict] = field(default_factory=list)
+    warm_summaries: list[TopicSnapshot] = field(default_factory=list)
+    total_turns: int = 0
+    created_at: str = ""
+    last_activity_at: str = ""
+```
+
+**关键语法：`@dataclass` 的 `field(default_factory=...)`**
+
+```python
+# 错误写法：所有实例共享同一个空列表！
+hot_messages: list[dict] = []
+
+# 正确写法：每个实例独立创建新列表
+hot_messages: list[dict] = field(default_factory=list)
+```
+
+为什么？Python 的默认参数在**函数定义时**求值（def-time evaluation）。对于 `@dataclass`，不加 `field(default_factory=...)` 会导致所有实例共享同一个可变对象。一个实例修改了列表，所有实例都会受影响。
+
+### 9.4 状态转换逻辑
+
+状态转换发生在 `SessionManager` 的三个方法中：
+
+```python
+def update(self, session_id, query, messages):
+    ctx = self._load_to_memory(session_id)
+    # ...
+    if ctx.status == "created":
+        ctx.status = "active"  # 首次消息 → active
+
+def archive(self, session_id, user_id=""):
+    ctx.status = "closing"  # 开始归档
+    # ... 写入冷层 ...
+    ctx.status = "archived"  # 归档完成
+```
+
+### 9.5 生命周期检查
+
+两个检查点，分别在 `_load_to_memory()` 和 `update()` 中：
+
+```python
+def _check_expired(self, ctx) -> bool:
+    """检查会话是否超过最大存活时间"""
+    created = datetime.fromisoformat(ctx.created_at)
+    elapsed = (datetime.now(timezone.utc) - created).total_seconds()
+    return elapsed > self._max_lifetime  # 默认 86400 秒（24 小时）
+```
+
+**空闲超时**由 Redis TTL 天然支持——每次 `update()` 刷新 TTL，Redis 过期后自动删除 key，下次读取时判为 idle。
+
+### 9.6 单例模式详解
+
+`SessionManager` 使用 `__new__` 实现单例：
+
+```python
+class SessionManager:
+    _instance: Optional["SessionManager"] = None
+
+    def __new__(cls, persist_dir: str = "data/sessions") -> "SessionManager":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+```
+
+**`__new__` vs `__init__` 的区别：**
+
+| 方法 | 调用时机 | 职责 | 参数 |
+|------|---------|------|------|
+| `__new__` | 对象创建前（类方法） | **分配内存**，返回实例 | `cls` + 构造参数 |
+| `__init__` | 对象创建后（实例方法） | **初始化**属性 | `self` + 构造参数 |
+
+单例的常见陷阱：
+
+```python
+# 问题：__init__ 每次都会执行，即使实例已经存在
+def __init__(self, persist_dir: str = "data/sessions"):
+    self.persist_dir = persist_dir  # 第二次调用会覆盖！
+
+# 修复：用标志位防止重复初始化
+def __init__(self, persist_dir: str = "data/sessions"):
+    if not self._persist_dir:  # 类变量，只初始化一次
+        self._persist_dir = persist_dir
+```
+
+---
+## 第十章 Redis 会话存储
+
+### 10.1 为什么用 Redis？
+
+| 方案 | 优点 | 缺点 |
+|------|------|------|
+| 纯内存 | 最快 | 进程重启丢失 |
+| 磁盘 JSON | 持久化 | 读写慢，需手动管理 |
+| **Redis** | 快 + 持久化 + TTL 自动过期 | 需要额外服务 |
+
+本项目的三层存储策略：
+- **热层/温层 → Redis**：活跃会话，需要快速读写 + TTL 自动过期
+- **冷层 → 磁盘 JSON**：已归档会话，长期保存，不需要频繁访问
+
+### 10.2 SessionRedisStore 设计
+
+```python
+class SessionRedisStore:
+    def __init__(self, redis_url, key_prefix, default_ttl):
+        self._redis = None
+        self._local = {}  # 内存兜底
+        self._available = False
+        self._connect(redis_url)
+
+    def _connect(self, redis_url):
+        try:
+            import redis as r
+            self._redis = r.from_url(redis_url, decode_responses=True)
+            self._redis.ping()
+            self._available = True
+        except Exception:
+            self._available = False  # 降级到内存
+```
+
+**核心设计模式：降级（Degradation）**
+- Redis 可用 → 读写 Redis
+- Redis 不可用 → 自动降级到 `self._local` 内存 dict
+- 下次操作时不会自动重连（避免每次调用都尝试连接），但 `save()` 和 `load()` 中如果检测到异常会再次尝试
+
+### 10.3 Redis 数据模型
+
+```
+Key:   session:{session_id}     ← 前缀可配置
+Value: JSON(ConversationContext) ← 完整的会话状态
+TTL:   session_idle_timeout     ← 每次访问刷新，过期自动删除
+```
+
+### 10.4 Redis TTL 自动过期
+
+```python
+def save(self, ctx, ttl=None):
+    ttl = ttl or self._default_ttl  # 默认 3600 秒
+    self._redis.setex(self._key(ctx.session_id), ttl, json_data)
+
+def refresh_ttl(self, session_id, ttl):
+    self._redis.expire(self._key(session_id), ttl)
+```
+
+`setex` = SET + EXPIRE 的原子操作。`EXPIRE` 命令设置 TTL，到期后 Redis 自动删除 key。
+
+**TTL 驱动状态机**：Redis key 过期 → 下次 `load()` 返回 `None` → `SessionManager` 判为 idle → 触发归档。不需要额外的定时任务。
+
+### 10.5 序列化与反序列化
+
+```python
+# 保存
+data = ctx.to_dict()  # ConversationContext → dict
+json_str = json.dumps(data, ensure_ascii=False)
+redis.setex(key, ttl, json_str)
+
+# 加载
+json_str = redis.get(key)
+data = json.loads(json_str)
+ctx = ConversationContext.from_dict(data)  # dict → ConversationContext
+```
+
+**`ensure_ascii=False` 的作用**：中文等非 ASCII 字符不会被转义成 `\uxxxx`，节省空间且可读性更好。
+
+### 10.6 冷层恢复
+
+```python
+def restore_from_archive(self, session_id):
+    archive_path = f"data/sessions/archive/{session_id}.json"
+    with open(archive_path) as f:
+        data = json.load(f)
+    # 从 ArchivedSession 格式重建 ConversationContext
+    ctx = ConversationContext(
+        session_id=session_id,
+        status="active",
+        hot_messages=[],  # 清空旧消息，只保留摘要
+        warm_summaries=[TopicSnapshot(...) for t in data.get("topics", [])],
+        total_turns=data.get("total_turns", 0),
+    )
+    if self._redis_store:
+        self._redis_store.save(ctx)  # 写回 Redis
+    return ctx
+```
+
+---
+## 第十一章 异步摘要生成
+
+### 11.1 为什么需要异步？
+
+在同步模式下，摘要生成阻塞诊断流程：
+
+```
+用户提问 → 热层溢出 → 调用 LLM 生成摘要（等 2-5 秒）→ 诊断推理 → 返回结果
+```
+
+用户需要额外等待摘要完成才能拿到诊断结果。异步模式将摘要移到后台：
+
+```
+用户提问 → 热层溢出 → 标记"需要摘要" → 立即返回裁剪后的消息 → 诊断推理 → 返回结果
+                                                                  ↓
+                                                         后台线程生成摘要 → 更新温层
+```
+
+### 11.2 架构设计
+
+```python
+class AsyncContextManager(SimpleContextManager):
+    """继承 SimpleContextManager，覆写为异步模式"""
+
+    def __init__(self, ..., session_manager=None, max_workers=2):
+        super().__init__(..., async_mode=True)  # ← 关键：开启异步模式
+        self._executor = ThreadPoolExecutor(max_workers=max_workers)
+
+    async def prepare_messages_async(self, ctx, query):
+        # 1. 同步裁剪（毫秒级）
+        result = self.prepare_from_context(ctx, query)
+
+        # 2. 如需摘要，异步执行
+        if result.metadata.trim_info.needs_summary:
+            future = asyncio.get_event_loop().run_in_executor(
+                self._executor,
+                self._generate_summary_sync,  # 后台线程执行
+                overflow, ctx, trim_info,
+            )
+            # 摘要完成后更新温层，不阻塞当前请求
+            asyncio.create_task(self._update_warm_async(future, session_id))
+
+        return result  # 立即返回，不等摘要
+```
+
+### 11.3 关键语法详解：`ThreadPoolExecutor` + `asyncio`
+
+这是一个 Python 中**同步代码 + 异步编排**的经典模式。
+
+**`ThreadPoolExecutor`**：线程池，管理一组工作线程。提交任务后返回 `Future` 对象。
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+
+executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="summarizer")
+
+# 同步提交（阻塞调用方线程）
+future = executor.submit(my_slow_function, arg1, arg2)
+result = future.result()  # 阻塞直到完成
+
+# 异步提交（不阻塞 asyncio 事件循环）
+future = asyncio.get_event_loop().run_in_executor(
+    executor, my_slow_function, arg1, arg2
+)
+# 继续执行其他代码...
+result = await asyncio.wrap_future(future)  # 异步等待
+```
+
+**`asyncio.get_event_loop().run_in_executor()`** 的作用：
+1. 把同步函数 `my_slow_function` 提交到线程池
+2. 返回一个 `asyncio.Future`（不是 `concurrent.futures.Future`）
+3. 当前协程可以 `await` 这个 Future，不阻塞事件循环
+4. 其他协程可以在等待期间继续执行
+
+**`asyncio.create_task()`**：把协程包装成 Task，在后台调度执行。
+
+```python
+# 立即返回，不等待 task 完成
+asyncio.create_task(self._update_warm_async(future, session_id))
+```
+
+这三个机制配合产生的效果：
+```
+主线程（事件循环）：
+  prepare_messages_async() → 提交摘要到线程池 → 返回裁剪后的消息
+  ↓
+  LLM 诊断推理（同步，但事件循环可以处理其他协程）
+  ↓
+  返回结果给用户
+
+后台线程：
+  _generate_summary_sync() → 调用 LLM 生成摘要 → 返回 TopicSnapshot
+
+摘要完成后（通过回调协程）：
+  _update_warm_async() → 更新温层 → 持久化到 Redis
+```
+
+### 11.4 异步模式下的摘要标记
+
+`SimpleContextManager` 中，`async_mode=True` 时 Step 1 不执行摘要，只标记：
+
+```python
+if hot_rounds > self.window_size:
+    # 移除溢出消息（同步，毫秒级）
+    ctx.hot_messages = ctx.hot_messages[keep_from:]
+
+    if overflow:
+        if self.async_mode:
+            # 只标记，不阻塞！
+            trim_info.needs_summary = True
+            trim_info.summarized_turns = hot_rounds - self.window_size
+        elif self.summarizer:
+            # 同步模式：立即生成摘要
+            snapshot = self.summarizer.summarize(overflow, ...)
+            ctx.warm_summaries.append(snapshot)
+```
+
+### 11.5 摘要丢弃策略
+
+后台摘要完成后，通过回调更新温层。但如果会话已经归档，就丢弃摘要：
+
+```python
+async def _update_warm_async(self, future, session_id):
+    snapshot = await asyncio.wrap_future(future)
+    if snapshot is None:
+        return
+
+    ctx = sm.get_conversation_context(session_id)
+    if ctx is None or ctx.status in ("archived", "closing"):
+        logger.info(f"异步摘要丢弃: 会话 {session_id} 已结束")
+        return  # 丢弃，不报错
+
+    ctx.warm_summaries.append(snapshot)
+    sm.add_warm_summary(session_id, snapshot)
+```
+
+**为什么可以丢弃？** 摘要的目的是优化"下一次"的上下文窗口。如果会话已经结束，不需要优化了，丢弃也无害。
+
+### 11.6 完整异步流程
+
+```
+用户输入 "电机抖动"
+  │
+  ▼
+chat 命令（异步）：
+  │
+  ├─ 1. sm.get_conversation_context(session_id)
+  │      → Redis 加载或新建
+  │
+  ├─ 2. acm.prepare_messages_async(ctx, query)
+  │      ├─ 同步裁剪（毫秒级）
+  │      ├─ 异步提交摘要（后台线程，不阻塞）
+  │      └─ 返回 PrepareResult
+  │
+  ├─ 3. agent.diagnose_with_standard_input(input, messages)
+  │      → LLM 诊断推理（可能 5-10 秒）
+  │
+  ├─ 4. sm.update(session_id, query, messages)
+  │      → 持久化到 Redis
+  │
+  └─ 5. 返回结果给用户
+        ↓
+  （后台）摘要完成 → 更新温层 → Redis 持久化
+```
+
+---
+## 附录：新增 CLI 命令
+
+### 会话管理
+
+```bash
+# 列出所有会话
+python -m diagnosis_agent.cli session list
+
+# 查看会话详情
+python -m diagnosis_agent.cli session show <session_id>
+
+# 手动归档会话
+python -m diagnosis_agent.cli session archive <session_id> --confirm
+
+# 从冷层恢复会话
+python -m diagnosis_agent.cli session restore <session_id>
+```
+
+---
+
+*文档版本: 3.0 | 最后更新: 2026-08-14 | 对应代码版本: diagnosis_agent v0.1.0*

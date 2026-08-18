@@ -115,7 +115,7 @@ class ChromaVectorStore(VectorStoreAdapter):
             texts.append(doc_text)
             metadatas.append(meta)
 
-        batch_size = 25
+        batch_size = 10
         added = 0
         for i in range(0, len(ids), batch_size):
             batch_ids = ids[i:i + batch_size]

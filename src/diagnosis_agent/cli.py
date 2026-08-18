@@ -691,6 +691,7 @@ def chat(
     mcuid: str = typer.Option("CLI", "--mcuid", "-m", help="MCU 标识（可选，默认 CLI）"),
     session_id: Optional[str] = typer.Option(None, "--session", "-s", help="会话ID（可选，不填自动生成）"),
     output_dir: str = typer.Option("output", "--output", "-o", help="报告输出目录"),
+    generate_md: bool = typer.Option(False, "--generate-md", "-g", help="每轮诊断后生成 Markdown 报告和 CSV/JSON 数据库条目"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
 ):
     """交互式多轮诊断 — 进程常驻，持续接收问题，支持多轮追问
@@ -698,13 +699,15 @@ def chat(
     为什么需要这个命令？
     - diagnose 命令是"一次性"的，进程退出后 SessionManager 内存状态就丢了。
     - chat 命令让进程常驻，同一 session_id 在内存中连续维护，多轮最自然。
-    - 即使退出，SessionManager 也默认把历史持久化到 data/sessions/{session_id}.json，
-      下次用 --session 指定同一 id 还能恢复。
+    - 即使退出，SessionManager 会把历史持久化到 Redis（热层/温层）或磁盘，
+      下次用 --session 指定同一 id 就能恢复之前的对话。
 
     用法示例：
         python -m diagnosis_agent.cli chat                                           # 交互模式
         python -m diagnosis_agent.cli chat "发动机有异响"                            # 单次提问
         python -m diagnosis_agent.cli chat --mcuid MCU_001                           # 指定 MCU
+        python -m diagnosis_agent.cli chat --session bugfix-test                     # 恢复历史会话
+        python -m diagnosis_agent.cli chat --generate-md                             # 每轮生成报告
         python -m diagnosis_agent.cli chat --mcuid MCU_001 --session my-session      # 指定会话
 
     输入 exit / quit / q 退出，Ctrl+C 也退出。
@@ -752,13 +755,40 @@ def chat(
 
     console.print(f"  MCU: [cyan]{mcuid}[/cyan]")
     console.print(f"  会话: [dim]{sess_id}[/dim] (输入 exit/quit/q 退出)")
+
+    # 恢复历史会话：显示完整历史消息和诊断结果
+    ctx = sm.get_conversation_context(sess_id)
+    if ctx and ctx.total_turns > 0:
+        console.print(f"  [dim]已恢复 {ctx.total_turns} 轮历史[/dim]")
+        if ctx.warm_summaries:
+            for s in ctx.warm_summaries:
+                console.print(f"    [dim]├─ [{s.topic_label}] {s.summary[:80]}...[/dim]")
+        # 从 metadata.diagnosis_history 显示历史诊断结果
+        diag_history = ctx.metadata.get("diagnosis_history", [])
+        for idx, d in enumerate(diag_history, 1):
+            cl = d.get("classification", "")
+            rc = d.get("root_cause", "")
+            sl = d.get("solution", "")
+            cf = d.get("confidence", 0)
+            sc = d.get("similar_count", 0)
+            console.print(f"    [dim]第{idx}轮 🤖 分类: {cl} | 根因: {rc[:60]}...[/dim]")
+            console.print(f"    [dim]            方案: {sl[:60]}... (置信度: {cf:.0%}, 相似工况: {sc} 条)[/dim]")
+        # 显示最后一条用户消息
+        if ctx.hot_messages:
+            for msg in reversed(ctx.hot_messages):
+                if isinstance(msg, dict) and msg.get("type") == "human":
+                    content = msg.get("data", {}).get("content", "")
+                    console.print(f"    [dim]└─ 最后提问: {content[:60]}...[/dim]")
+                    break
     console.print()
 
     round_num = sm.get_round_count(sess_id) + 1
+    _current_sess_id = [sess_id]  # 闭包可变引用，话题切换时更新
 
-    def _do_chat_round(query: str, sess_id: str, mcuid: str, round_num: int):
-        """执行一轮对话"""
-        nonlocal context_manager, agent, sm
+    def _do_chat_round(query: str, mcuid: str, round_num: int):
+        """执行一轮对话，话题切换时自动更新 _current_sess_id[0]"""
+        nonlocal context_manager, agent, sm, output_dir, generate_md
+        sess_id = _current_sess_id[0]
 
         standard_input = StandardInput(
             raw_query=query,
@@ -773,6 +803,17 @@ def chat(
         if ctx:
             prepared = context_manager.prepare_from_context(ctx, query)
 
+        # 话题切换检测：归档旧会话，创建新会话，继续诊断
+        if prepared and prepared.metadata.topic_changed:
+            old_sess_id = sess_id
+            new_sess_id = f"{old_sess_id}-topic-{sm.get_round_count(old_sess_id) + 1}"
+            sm.archive(old_sess_id)
+            _current_sess_id[0] = new_sess_id
+            sess_id = new_sess_id
+            console.print(f"  [dim]话题已切换，旧会话 {old_sess_id} 已归档，新会话 {new_sess_id}[/dim]")
+            # 新会话首次获取上下文，无历史消息
+            ctx = sm.get_conversation_context(sess_id)
+
         # scope 检测判定不在范围内，直接返回 -3
         if prepared and not prepared.metadata.is_in_scope:
             from .models.converter import build_error_output
@@ -782,10 +823,26 @@ def chat(
                 standard_input=standard_input,
             )
         else:
+            # 设置实时回调，流式打印 ReAct 步骤
+            def _stream_print(msg):
+                if hasattr(msg, 'content') and isinstance(msg.content, str) and msg.content:
+                    # 跳过工具返回的原始 JSON
+                    skip_types = getattr(msg, 'additional_kwargs', {})
+                    if skip_types.get('tool_calls'):
+                        return
+                    content = msg.content.strip()
+                    if content and len(content) < 500:
+                        console.print(f"  [dim]💭 {content[:120]}...[/dim]" if len(content) > 120 else f"  [dim]💭 {content}[/dim]")
+                elif hasattr(msg, 'tool_call_id') and hasattr(msg, 'content'):
+                    obs = str(msg.content)[:120]
+                    console.print(f"  [dim]👁 {obs}...[/dim]")
+
+            agent._stream_callback = _stream_print
             standard_output = agent.diagnose_with_standard_input(
                 standard_input,
                 prepared_messages=prepared.messages if prepared else None,
             )
+            agent._stream_callback = None
 
         if standard_output.code == 0:
             from langchain_core.messages import messages_to_dict
@@ -793,34 +850,207 @@ def chat(
             sm.update(sess_id, query, current_messages)
             result = standard_output.diagnosis_result
             if result:
+                similar_count = 0
+                last_output = getattr(agent, "_last_diagnostic_output", None)
+                if last_output and last_output.report:
+                    similar_count = len(last_output.report.similar_cases)
+
                 console.print(f"  [cyan]分类:[/cyan] {result.classification}")
+                console.print(f"  [cyan]相似工况:[/cyan] {similar_count} 条")
                 console.print(f"  [cyan]根因:[/cyan] {result.fault_root_cause[0] if result.fault_root_cause else 'N/A'}")
                 console.print(f"  [cyan]方案:[/cyan] {result.solution[0] if result.solution else 'N/A'}")
                 console.print(f"  [cyan]置信度:[/cyan] {standard_output.diagnosis_confidence:.0%}")
                 console.print()
+                # 把格式化结果存入 metadata，恢复时可直接显示（不干扰 hot_messages 序列化）
+                ctx = sm.get_conversation_context(sess_id)
+                if ctx:
+                    history = ctx.metadata.setdefault("diagnosis_history", [])
+                    history.append({
+                        "classification": result.classification,
+                        "similar_count": similar_count,
+                        "root_cause": result.fault_root_cause[0] if result.fault_root_cause else "",
+                        "solution": result.solution[0] if result.solution else "",
+                        "confidence": standard_output.diagnosis_confidence,
+                    })
+                    if sm._redis_store:
+                        sm._redis_store.save(ctx, ttl=sm._idle_timeout)
+                # 生成报告（--generate-md 参数启用）
+                if generate_md:
+                    internal_output = getattr(agent, "_last_diagnostic_output", None)
+                    if internal_output:
+                        md_path = generate_markdown_report(internal_output, output_dir=output_dir)
+                        db_paths = generate_db_entries(internal_output, output_dir=output_dir)
+                        console.print(f"  [dim]📄 Markdown: {md_path}[/dim]")
+                        console.print(f"  [dim]📊 CSV: {db_paths.get('csv', '')}[/dim]")
         else:
             console.print(f"  [red]诊断失败: {standard_output.msg}[/red]")
 
-    # 如果传了初始问题，先处理这一轮
+    # 聊天空闲超时检测：后台线程 + PromptSession.app.exit() 优雅退出
+    import threading
+    from prompt_toolkit import PromptSession
+    _chat_idle_timeout = settings.context.chat_idle_timeout
+    _idle_stop = threading.Event()
+    _idle_reset = threading.Event()
+
+    _prompt_session = PromptSession()
+
+    def _idle_timer():
+        while not _idle_stop.is_set():
+            timed_out = _idle_reset.wait(timeout=_chat_idle_timeout)
+            if _idle_stop.is_set():
+                return
+            if not timed_out:
+                _prompt_session.app.exit(exception=EOFError("聊天空闲超时"))
+                return
+            _idle_reset.clear()
+
+    _idle_thread = threading.Thread(target=_idle_timer, daemon=True)
+    _idle_thread.start()
+
+    # 如果传了初始问题，先处理这一轮，然后重置计时器
     if initial_question:
-        _do_chat_round(initial_question, sess_id, mcuid, round_num)
+        _do_chat_round(initial_question, mcuid, round_num)
         round_num += 1
+        _idle_reset.set()
 
     while True:
         try:
-            user_input = console.input(f"[bold green]第{round_num}轮[/bold green] > ").strip()
+            user_input = _prompt_session.prompt(f"第{round_num}轮 > ").strip()
         except (EOFError, KeyboardInterrupt):
-            console.print("\n[dim]已退出交互模式[/dim]")
+            _idle_stop.set()
+            _idle_reset.set()
+            sm.archive(_current_sess_id[0])
+            console.print("\n[dim]已退出交互模式（会话已归档）[/dim]")
             break
 
         if not user_input:
             continue
         if user_input.lower() in ("exit", "quit", "q"):
-            console.print(f"[dim]已退出，会话 {sess_id} 共 {round_num - 1} 轮[/dim]")
+            _idle_stop.set()
+            _idle_reset.set()
+            sm.archive(_current_sess_id[0])
+            console.print(f"[dim]已退出，会话 {_current_sess_id[0]} 共 {round_num - 1} 轮（已归档）[/dim]")
             break
 
-        _do_chat_round(user_input, sess_id, mcuid, round_num)
+        _idle_reset.set()
+        _do_chat_round(user_input, mcuid, round_num)
         round_num += 1
+
+
+# ---------------------------------------------------------------------------
+# 会话管理命令
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def session_list(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
+):
+    """列出所有会话（活跃 + 归档）"""
+    _setup_logging(verbose)
+    from .agent.session_manager import SessionManager
+
+    sm = SessionManager()
+    active = sm.list_active()
+    archived = sm.list_archived()
+
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("状态", style="bold", width=10)
+    table.add_column("会话 ID", width=40)
+    table.add_column("轮次", justify="right", width=6)
+
+    for sid in active:
+        ctx = sm.get_conversation_context(sid)
+        turns = ctx.total_turns if ctx else "?"
+        table.add_row("[green]活跃[/green]", sid, str(turns))
+
+    for sid in archived:
+        # 从归档文件读取轮次
+        import json
+        archive_path = Path("data/sessions/archive") / f"{sid}.json"
+        turns = "-"
+        if archive_path.exists():
+            try:
+                with open(archive_path) as f:
+                    data = json.load(f)
+                turns = str(data.get("total_turns", "?"))
+            except Exception:
+                pass
+        table.add_row("[dim]归档[/dim]", sid, turns)
+
+    console.print(Panel.fit("📋 会话列表", style="bold blue"))
+    if not active and not archived:
+        console.print("  无会话")
+    else:
+        console.print(table)
+        console.print(f"  活跃: {len(active)} | 归档: {len(archived)}")
+
+
+@app.command()
+def session_show(
+    session_id: str = typer.Argument(..., help="会话 ID"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
+):
+    """查看会话详情"""
+    _setup_logging(verbose)
+    from .agent.session_manager import SessionManager
+
+    sm = SessionManager()
+    status = sm.get_session_status(session_id)
+
+    console.print(Panel.fit(f"📄 会话: {session_id}", style="bold blue"))
+    console.print(f"  状态: [cyan]{status}[/cyan]")
+
+    if status == "archived":
+        # 从冷层读取
+        import json
+        from pathlib import Path
+        archive_path = Path("data/sessions/archive") / f"{session_id}.json"
+        if archive_path.exists():
+            with open(archive_path) as f:
+                data = json.load(f)
+            console.print(f"  总轮次: {data.get('total_turns', '?')}")
+            # 兼容两种归档格式：ArchivedSession(topics) 和 ConversationContext(warm_summaries)
+            topics = data.get("topics", data.get("warm_summaries", []))
+            console.print(f"  话题数: {len(topics)}")
+            for t in topics:
+                summary = t.get("summary", "")[:100]
+                label = t.get("topic_label", t.get("topic_id", "?"))
+                console.print(f"    - [{label}] {summary}...")
+    else:
+        ctx = sm.get_conversation_context(session_id)
+        if ctx:
+            console.print(f"  总轮次: {ctx.total_turns}")
+            console.print(f"  热层消息: {len(ctx.hot_messages)} 条")
+            console.print(f"  温层摘要: {len(ctx.warm_summaries)} 个")
+            console.print(f"  创建时间: {ctx.created_at[:19]}")
+            console.print(f"  最后活动: {ctx.last_activity_at[:19]}")
+            if ctx.current_topic:
+                console.print(f"  当前话题: {ctx.current_topic.topic_label}")
+        else:
+            console.print("[yellow]  会话不在内存中[/yellow]")
+
+
+@app.command()
+def session_archive(
+    session_id: str = typer.Argument(..., help="会话 ID"),
+    confirm: bool = typer.Option(False, "--confirm", "-y", help="确认归档"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
+):
+    """手动归档会话"""
+    _setup_logging(verbose)
+    if not confirm:
+        console.print("[yellow]请使用 --confirm 确认归档操作[/yellow]")
+        raise typer.Exit(1)
+
+    from .agent.session_manager import SessionManager
+
+    sm = SessionManager()
+    result = sm.archive(session_id)
+    if result:
+        console.print(f"[green]✅ 会话 {session_id} 已归档 ({result.total_turns} 轮)[/green]")
+    else:
+        console.print(f"[red]❌ 归档失败: 会话 {session_id} 不存在[/red]")
 
 
 def main():

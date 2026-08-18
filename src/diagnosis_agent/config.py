@@ -186,8 +186,9 @@ class ContextConfig(BaseModel):
 
     # ── 生命周期配置 ──
     max_turns: int = 100                   # 最大保留轮次（超过后强制归档）
-    session_idle_timeout: int = 3600       # 会话空闲超时（秒）
+    session_idle_timeout: int = 3600       # 会话空闲超时（秒），超时后自动归档到冷层
     session_max_lifetime: int = 86400      # 会话最大存活时间（秒）
+    chat_idle_timeout: int = 1800          # chat 聊天空闲超时（秒），超时后自动退出交互模式
 
     # ── 缓存配置 ──
     cache_context_window: int = 3          # 缓存上下文窗口大小
@@ -195,6 +196,16 @@ class ContextConfig(BaseModel):
     # ── 降级配置 ──
     emergency_min_turns: int = 1           # 紧急截断时保留的最小轮次
     degradation_logging: bool = True       # 是否启用降级日志
+
+    # ── Redis 存储配置（热层/温层） ──
+    redis: "RedisConfig" = Field(default_factory=lambda: RedisConfig())
+
+
+class RedisConfig(BaseModel):
+    """Redis 存储配置 — 热层/温层持久化"""
+    enabled: bool = False
+    url: str = "redis://localhost:6379/0"
+    key_prefix: str = "session:"
 
 
 class Settings(BaseModel):

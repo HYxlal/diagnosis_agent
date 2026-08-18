@@ -17,10 +17,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
@@ -29,6 +31,7 @@ from .context.types import (
     PrepareResult,
     TrimInfo,
     ConversationContext,
+    TopicSnapshot,
 )
 
 logger = logging.getLogger(__name__)
@@ -159,6 +162,7 @@ class SimpleContextManager:
         max_tokens: 消息列表总 token 预算上限，默认 8000
         summarizer: 摘要生成器（可选，Step 1 注入）
         topic_detector: 话题检测器（可选，Step 1 注入）
+        async_mode: 异步模式，为 True 时 Step 1 只标记 needs_summary 不执行摘要
     """
 
     def __init__(
@@ -167,11 +171,13 @@ class SimpleContextManager:
         max_tokens: int = 8000,
         summarizer=None,
         topic_detector=None,
+        async_mode: bool = False,
     ):
         self.window_size = window_size
         self.max_tokens = max_tokens
         self.summarizer = summarizer
         self.topic_detector = topic_detector
+        self.async_mode = async_mode
 
     def prepare(self, messages: list) -> PrepareResult:
         """裁剪消息到预算内，返回 PrepareResult
@@ -300,9 +306,34 @@ class SimpleContextManager:
         # 步骤1: 热层超 window_size → 溢出消息生成摘要，追加到温层
         hot_rounds = self._count_hot_rounds(ctx)
         if hot_rounds > self.window_size:
-            self._step1_hot_to_warm(ctx)
-            trim_info.step = "summarize"
-            trim_info.summarized_turns = hot_rounds - self.window_size
+            # 先移除溢出消息（同步，毫秒级）
+            boundaries = self._find_hot_round_boundaries(ctx)
+            keep_from = boundaries[-self.window_size]
+            overflow = ctx.hot_messages[:keep_from]
+            ctx.hot_messages = ctx.hot_messages[keep_from:]
+
+            if overflow:
+                if self.async_mode:
+                    # 异步模式：只标记需要摘要，不阻塞
+                    trim_info.needs_summary = True
+                    trim_info.summarized_start = 0
+                    trim_info.summarized_turns = hot_rounds - self.window_size
+                    trim_info.step = "summarize"
+                elif self.summarizer:
+                    # 同步模式：有摘要器则立即生成摘要
+                    from .context.types import TopicSnapshot
+                    new_snapshot = self.summarizer.summarize(
+                        overflow,
+                        topic_label=f"对话摘要-{ctx.total_turns - self.window_size + 1}-{ctx.total_turns}轮",
+                        start_turn=ctx.total_turns - self.window_size,
+                        end_turn=ctx.total_turns,
+                    )
+                    ctx.warm_summaries.append(new_snapshot)
+                    trim_info.step = "summarize"
+                    trim_info.summarized_turns = hot_rounds - self.window_size
+                else:
+                    # 无摘要器时的兜底：只丢弃溢出消息
+                    trim_info.step = "trim"
 
         # ── 构建消息（初始版本，用于检查 token 预算） ──
         messages: list = []
@@ -311,7 +342,9 @@ class SimpleContextManager:
             if summary_text:
                 messages.append(SystemMessage(content=summary_text))
         if ctx.hot_messages:
-            messages.extend(messages_from_dict(ctx.hot_messages))
+            # 过滤掉自定义类型（如 diagnosis_result），避免 messages_from_dict 报错
+            safe_messages = [m for m in ctx.hot_messages if m.get("type") not in ("diagnosis_result",)]
+            messages.extend(messages_from_dict(safe_messages))
         messages.append({"role": "user", "content": query})
 
         # 检查 token 预算
@@ -329,7 +362,8 @@ class SimpleContextManager:
                     if summary_text:
                         messages.append(SystemMessage(content=summary_text))
                 if ctx.hot_messages:
-                    messages.extend(messages_from_dict(ctx.hot_messages))
+                    safe_messages = [m for m in ctx.hot_messages if m.get("type") not in ("diagnosis_result",)]
+                    messages.extend(messages_from_dict(safe_messages))
                 messages.append({"role": "user", "content": query})
 
                 # 重新检查
@@ -632,3 +666,170 @@ class SimpleContextManager:
         # 粗略估算：轮次数 ≈ 用户消息数
         average_messages_per_round = max(1, len(messages) // max(1, len(boundaries)))
         return max(1, dropped_count // average_messages_per_round)
+
+    def _get_messages_for_summary(
+        self, ctx: ConversationContext, trim_info: TrimInfo
+    ) -> list[dict]:
+        """获取需要摘要的溢出消息列表（供 AsyncContextManager 使用）
+
+        根据 trim_info 中的 summarized_start/turns 定位溢出消息。
+        """
+        if not trim_info.needs_summary or trim_info.summarized_turns <= 0:
+            return []
+        boundaries = self._find_hot_round_boundaries(ctx)
+        # 这个方法是基于"溢出消息已被移除后"的热层来计算的，
+        # 所以这里返回空，实际溢出消息需要在 prepare_from_context 中捕获
+        return []
+
+
+# ---------------------------------------------------------------------------
+# AsyncContextManager — 异步摘要生成
+# ---------------------------------------------------------------------------
+
+
+class AsyncContextManager(SimpleContextManager):
+    """Phase 3: 异步摘要生成器
+
+    继承 SimpleContextManager，覆写 prepare_from_context 使其异步。
+    摘要生成不阻塞诊断主流程，在后台线程执行。
+
+    流程：
+    1. prepare_from_context 同步裁剪（毫秒级），立即返回
+    2. 如需摘要，提交到后台线程池执行
+    3. 摘要完成后回调更新温层（下次请求生效）
+    4. 同步摘要做兜底（线程池满 / Redis 不可用时）
+    5. 摘要可丢弃（会话已归档时忽略回调）
+
+    Args:
+        session_manager: SessionManager 实例（用于摘要完成后持久化）
+        max_workers: 后台线程池大小
+    """
+
+    def __init__(
+        self,
+        window_size: int = 5,
+        max_tokens: int = 8000,
+        summarizer=None,
+        topic_detector=None,
+        session_manager=None,
+        max_workers: int = 2,
+    ):
+        super().__init__(
+            window_size=window_size,
+            max_tokens=max_tokens,
+            summarizer=summarizer,
+            topic_detector=topic_detector,
+            async_mode=True,
+        )
+        self._session_manager = session_manager
+        self._executor = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="summarizer",
+        )
+        self._overflow_cache: dict[str, list[dict]] = {}  # session_id → 溢出消息
+
+    async def prepare_messages_async(
+        self, ctx: ConversationContext, query: str
+    ) -> PrepareResult:
+        """异步版本 — 摘要生成不阻塞
+
+        1. 调用父类 prepare_from_context（同步裁剪，仅标记 needs_summary）
+        2. 如需摘要，提交到后台线程池
+        3. 先返回裁剪后的消息给 LLM
+        4. 摘要完成后更新温层（下次请求生效）
+        """
+        # 1. 同步裁剪（毫秒级）
+        result = self.prepare_from_context(ctx, query)
+
+        # 2. 如需摘要，异步执行
+        trim_info = result.metadata.trim_info
+        if trim_info.needs_summary and self.summarizer:
+            session_id = ctx.session_id
+            overflow = self._overflow_cache.pop(session_id, [])
+            if overflow:
+                future = asyncio.get_event_loop().run_in_executor(
+                    self._executor,
+                    self._generate_summary_sync,
+                    overflow,
+                    ctx,
+                    trim_info,
+                )
+                # 摘要完成后更新温层，不阻塞当前请求
+                asyncio.create_task(self._update_warm_async(future, session_id))
+
+        return result
+
+    # 覆写 prepare_from_context，在 async_mode 下捕获溢出消息
+    def prepare_from_context(
+        self, ctx: ConversationContext, query: str
+    ) -> PrepareResult:
+        """覆写父类方法，在 async_mode 下捕获溢出消息存到缓存"""
+        # 在调用父类前，先捕获溢出消息
+        hot_rounds = self._count_hot_rounds(ctx)
+        if hot_rounds > self.window_size:
+            boundaries = self._find_hot_round_boundaries(ctx)
+            keep_from = boundaries[-self.window_size]
+            overflow = ctx.hot_messages[:keep_from]
+            if overflow:
+                self._overflow_cache[ctx.session_id] = list(overflow)
+
+        return super().prepare_from_context(ctx, query)
+
+    async def _update_warm_async(
+        self, future: asyncio.Future, session_id: str
+    ) -> None:
+        """摘要完成后更新温层
+
+        如果会话已归档，丢弃摘要。
+        """
+        try:
+            from asyncio import wrap_future
+            snapshot = await wrap_future(future)
+            if snapshot is None:
+                return
+
+            # 通过 SessionManager 获取最新上下文
+            sm = self._session_manager
+            if sm is None:
+                return
+
+            ctx = sm.get_conversation_context(session_id)
+            if ctx is None:
+                return
+            # 会话已结束，丢弃摘要
+            if ctx.status in ("archived", "closing", "error"):
+                logger.info(f"异步摘要丢弃: 会话 {session_id} 已结束")
+                return
+
+            ctx.warm_summaries.append(snapshot)
+            # 持久化到 Redis
+            sm.add_warm_summary(session_id, snapshot)
+            logger.info(f"异步摘要已更新: {session_id} ({snapshot.topic_label})")
+        except Exception as e:
+            logger.warning(f"异步摘要更新失败（可丢弃）: {e}")
+
+    def _generate_summary_sync(
+        self,
+        overflow: list[dict],
+        ctx: ConversationContext,
+        trim_info: TrimInfo,
+    ) -> TopicSnapshot | None:
+        """同步摘要方法（在后台线程执行）"""
+        if not self.summarizer:
+            return None
+        try:
+            from .context.types import TopicSnapshot
+            return self.summarizer.summarize(
+                overflow,
+                topic_label=f"对话摘要-{trim_info.summarized_turns}轮",
+                start_turn=trim_info.summarized_start,
+                end_turn=ctx.total_turns,
+            )
+        except Exception as e:
+            logger.warning(f"异步摘要生成失败: {e}")
+            return None
+
+    def shutdown(self, wait: bool = True) -> None:
+        """关闭线程池"""
+        self._executor.shutdown(wait=wait)
+        logger.info("异步摘要线程池已关闭")

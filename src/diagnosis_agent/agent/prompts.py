@@ -94,7 +94,10 @@ Action Input: 最终诊断结果（必须为以下 JSON 格式）
 - Final Answer 中所有字段都必须填充，不可为空数组或空字符串
 - classification 必须从给定的故障分类选项中选择
 - 如果未检索到相似工况，基于你的专业领域知识进行推理
-- confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定，0.5 以下为推测"""
+- confidence 反映你对诊断结论的把握程度：
+     - 检索到匹配的相似工况（相似度 >= 0.7）→ 0.8 以上
+     - 检索到部分相关工况（相似度 0.4-0.7）→ 0.5-0.8
+     - 未检索到任何相似工况，仅凭领域知识推理 → 0.5 以下"""
 
 
 def build_system_prompt(tool_descriptions: str) -> str:
@@ -125,16 +128,12 @@ def build_similar_case_prompt(
 def build_no_similar_case_prompt(
     description: str,
 ) -> str:
-    """构建无相似工况时的 user prompt"""
+    """构建无预检索时的 user prompt（中性，不预设有无相似工况）"""
     return f"""## 当前故障描述
 
 {description}
 
-## 检索结果
-
-未找到相似工况。请基于你的专业领域知识进行推理，给出 Final Answer。
-
-注意：即使没有相似工况，你仍然需要先调用 search_similar_incidents 确认检索结果，再给出 Final Answer。"""
+请开始 ReAct 推理。先调用 search_similar_incidents 检索历史工单，分析检索结果与当前故障的关联，然后给出 Final Answer。"""
 
 
 def format_similar_cases_for_prompt(cases: list) -> str:

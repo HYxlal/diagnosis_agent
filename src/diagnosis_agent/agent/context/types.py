@@ -52,6 +52,8 @@ class TrimInfo:
     step: str = "none"            # 裁剪步骤: none | trim | summarize | emergency
     trimmed_turns: int = 0        # 被裁剪的轮次
     summarized_turns: int = 0     # 被摘要的轮次（预留，Step 1 实现）
+    needs_summary: bool = False   # 是否需要异步摘要（AsyncContextManager 使用）
+    summarized_start: int = 0     # 摘要起始轮次（供后台线程使用）
 
 
 # ---------------------------------------------------------------------------
@@ -106,9 +108,13 @@ class ConversationContext:
 
     热层消息格式：LangChain messages_to_dict() 的 dict 列表，
     内部使用 messages_from_dict() 恢复为 BaseMessage。
+
+    状态机：created → active → idle → closing → archived（+ error）
     """
 
     session_id: str = ""
+    # 会话状态（状态机）
+    status: str = "created"  # created | active | idle | closing | archived | error
     # 热层：最近 N 轮完整消息
     hot_messages: list[dict] = field(default_factory=list)
     # 温层：旧对话摘要
@@ -129,6 +135,7 @@ class ConversationContext:
         """序列化为 dict（用于 JSON 持久化）"""
         return {
             "session_id": self.session_id,
+            "status": self.status,
             "hot_messages": self.hot_messages,
             "warm_summaries": [
                 {
@@ -168,6 +175,7 @@ class ConversationContext:
         """从 dict 反序列化"""
         ctx = cls(
             session_id=data.get("session_id", ""),
+            status=data.get("status", "active"),  # 兼容旧数据：无 status 字段时默认为 active
             hot_messages=data.get("hot_messages", []),
             archived_topic_count=data.get("archived_topic_count", 0),
             total_turns=data.get("total_turns", 0),
@@ -226,13 +234,15 @@ class ConversationContext:
 class ArchivedSession:
     """归档记录 — 冷层持久化对象
 
-    会话关闭时，将 ConversationContext 压缩为归档记录。
+    会话关闭或话题切换时，将 ConversationContext 完整归档。
+    同时保存温层摘要和热层消息，支持恢复后显示历史对话。
     归档文件存储在 data/sessions/archive/{session_id}.json。
     """
 
     session_id: str
     total_turns: int
     topics: list[TopicSnapshot] = field(default_factory=list)
+    hot_messages: list[dict] = field(default_factory=list)  # 完整热层消息
     created_at: str = ""
     archived_at: str = ""
     duration: int = 0         # 会话时长（秒）
@@ -255,6 +265,7 @@ class ArchivedSession:
                 }
                 for ts in self.topics
             ],
+            "hot_messages": self.hot_messages,
             "created_at": self.created_at,
             "archived_at": self.archived_at,
             "duration": self.duration,

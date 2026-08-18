@@ -21,16 +21,48 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass
 from typing import Optional
 
+from pydantic import BaseModel, Field
 from ...config import get_settings
 from ...utils.llm_factory import create_llm, create_embedding
-from ...prompts.topic_detector import TOPIC_JUDGE_PROMPT, SCOPE_CHECK_PROMPT
+from langchain_core.output_parsers import PydanticOutputParser
+
+from ...prompts.topic_detector import SCOPE_CHECK_PROMPT
 from .types import ConversationContext, TopicSnapshot
 
 logger = logging.getLogger(__name__)
+
+
+class TopicDecisionOutput(BaseModel):
+    """LLM 话题精判输出格式（用于 PydanticOutputParser）"""
+    decision: str = Field(
+        default="same",
+        description='话题切换判断: "same" 或 "different"',
+        json_schema_extra={"enum": ["same", "different"]}
+    )
+    confidence: float = Field(
+        default=0.5,
+        ge=0.0, le=1.0,
+        description="置信度 0.0~1.0",
+    )
+    new_topic_label: str = Field(
+        default="",
+        description='新话题标签，decision="different" 时必填；否则为空',
+    )
+    is_in_scope: bool = Field(
+        default=True,
+        description='是否在电驱诊断范围内: true 或 false',
+    )
+
+
+class ScopeCheckOutput(BaseModel):
+    """LLM scope 精判输出格式"""
+    is_in_scope: bool = Field(
+        default=True,
+        description='是否在车辆电驱故障诊断范围内: true 或 false',
+    )
 
 
 @dataclass
@@ -263,20 +295,51 @@ class TopicDetector:
         return None
 
     def _scope_llm_check(self, query: str) -> Optional[bool]:
-        """LLM 精判 scope（scope-only prompt，不涉及话题比较）"""
+        """LLM 精判 scope（scope-only prompt，使用 PydanticOutputParser）"""
         model = self.model or get_settings().context.topic_detection_model or get_settings().llm.model
         try:
-            llm = create_llm(
-                model=model,
-                temperature=0.1,
-                max_tokens=64,
-            )
-            prompt = SCOPE_CHECK_PROMPT.format(current_query=query[:500])
-            response = llm.invoke(prompt)
-            data = self._parse_json(response.content)
-            logger.info(f"Scope LLM 精判: {data}")
-            if data and "is_in_scope" in data:
-                return bool(data["is_in_scope"])
+            parser = PydanticOutputParser(pydantic_object=ScopeCheckOutput)
+            prompt_text = f"""你是一个电驱系统故障诊断领域判断器，只需判断用户问题是否属于车辆电驱系统故障诊断范围。
+
+## 当前问题
+{query[:500]}
+
+## 任务
+判断此问题是否属于车辆电驱系统故障诊断话题。
+核心标准：用户是否在描述一个故障现象、询问故障原因或解决方案？
+
+是 → is_in_scope=true
+否 → is_in_scope=false
+
+## 判断规则
+属于诊断范围（is_in_scope=true）：
+- 用户描述了一个故障现象或询问故障原因、诊断方法、维修方案
+- 用户提供排查过程中的补充信息
+
+不属于诊断范围（is_in_scope=false）：
+- 用户只是提到部件名称但实际在问无关信息
+- 完全无关的领域：天气、股票、娱乐、餐饮、导航、充电桩、空调、音响、车体外观
+- 如果你无法确定，is_in_scope=true
+
+{parser.get_format_instructions()}"""
+
+            llm = create_llm(model=model, temperature=0.0, max_tokens=512)
+            response = llm.invoke(prompt_text)
+            content = response.content or ""
+            try:
+                parsed = parser.parse(content)
+                logger.info(f"Scope LLM 精判: is_in_scope={parsed.is_in_scope}")
+                return bool(parsed.is_in_scope)
+            except Exception:
+                # PydanticOutputParser 失败，回退手写解析
+                data = self._parse_json(content)
+                if data and "is_in_scope" in data:
+                    result = bool(data["is_in_scope"])
+                    logger.info(f"Scope LLM 精判(回退): is_in_scope={result}")
+                    return result
+                # 模型返回空内容，无法判断时保守判为在范围内
+                logger.warning(f"Scope LLM 精判返回空内容，保守判为在范围内")
+                return None
         except Exception as e:
             logger.warning(f"Scope LLM 精判失败: {e}")
         return None
@@ -416,6 +479,8 @@ class TopicDetector:
 
         输入上一轮摘要 + 当前 query，输出话题决策。
         同时判断是否在电驱范围内（融合 InputRouter out_of_scope）。
+
+        使用 PydanticOutputParser 强制 LLM 按 TopicDecisionOutput 格式输出 JSON。
         """
         previous_summary = self._build_previous_summary(ctx)
         if not previous_summary:
@@ -423,47 +488,80 @@ class TopicDetector:
 
         model = self.model or get_settings().context.topic_detection_model or get_settings().llm.model
         try:
+            parser = PydanticOutputParser(pydantic_object=TopicDecisionOutput)
+
+            # 构建带 format instructions 的 prompt
+            prompt_text = f"""你是一个话题检测器，判断用户当前问题是否为车辆电驱故障类诊断话题，以及是否与之前对话属于同一话题。
+
+## 之前对话摘要
+{previous_summary[:2000]}
+
+## 当前问题
+{query[:500]}
+
+## 任务
+首先判断当前问题与之前对话是否属于同一话题，再判断此话题是否属于车辆电驱故障类诊断话题。
+
+规则：
+- 当用户明确提到换个问题/换个话题/另一个问题时必须判为 different，此时无需在意其他 different/same 相关规则
+- 如果用户的问题是对之前话题的追问、补充信息、确认，都属于 same topic
+- 当用户特别明确提到不同的故障码/完全不相关的故障现象时判为 different，注意，提到与上文不同的故障现象也可能是在补充信息，请准确判断
+- 如果你无法肯定算不算同一话题，那就判 same topic
+- 话题与车辆电驱故障相关时，is_in_scope=true
+- 如果话题不在车辆电驱故障诊断范围内，is_in_scope=false
+- 如果你无法肯定算不算在诊断范围内，那就判 is_in_scope=true
+
+{parser.get_format_instructions()}
+
+只输出 JSON，不要其他内容。"""
+
             llm = create_llm(
                 model=model,
                 temperature=0.1,
-                max_tokens=256,
+                max_tokens=512,
             )
-            prompt = TOPIC_JUDGE_PROMPT.format(
-                previous_summary=previous_summary[:2000],
-                current_query=query[:500],
-            )
-            response = llm.invoke(prompt)
-            data = self._parse_json(response.content)
-            logger.info(f"LLM 话题精判结果: {data}")
-            if not data:
+            response = llm.invoke(prompt_text)
+            content = response.content or ""
+            try:
+                parsed = parser.parse(content)
+            except Exception:
+                # PydanticOutputParser 失败，回退手写解析
+                data = self._parse_json(content)
+                if data:
+                    parsed = TopicDecisionOutput(**data)
+                else:
+                    logger.warning(f"LLM 话题精判解析失败，原始响应: {content[:200]}")
+                    return None
+            if not parsed:
                 return None
 
-            decision_str = data.get("decision", "same")
-            is_in_scope = data.get("is_in_scope", True)
-            confidence = float(data.get("confidence", 0.5))
+            logger.info(
+                f"LLM 话题精判: decision={parsed.decision}, "
+                f"is_in_scope={parsed.is_in_scope}, confidence={parsed.confidence}"
+            )
 
             # 如果不在电驱范围内，统一标记为话题切换
-            if not is_in_scope:
+            if not parsed.is_in_scope:
                 return TopicDecision(
                     decision="different",
-                    confidence=confidence,
-                    new_topic_label= data.get("new_topic_label", ""),
+                    confidence=parsed.confidence,
+                    new_topic_label=parsed.new_topic_label,
                     is_in_scope=False,
                     method="llm",
                 )
 
-            if decision_str == "different":
+            if parsed.decision == "different":
                 return TopicDecision(
                     decision="different",
-                    confidence=confidence,
-                    new_topic_label=data.get("new_topic_label", ""),
+                    confidence=parsed.confidence,
+                    new_topic_label=parsed.new_topic_label,
                     is_in_scope=True,
                     method="llm",
                 )
             else:
                 return TopicDecision(
                     decision="same",
-                    confidence=confidence,
+                    confidence=parsed.confidence,
                     is_in_scope=True,
                     method="llm",
                 )
@@ -544,18 +642,37 @@ class TopicDetector:
         return "\n".join(parts) if parts else ""
 
     def _parse_json(self, content: str) -> Optional[dict]:
-        """解析 LLM 返回的 JSON"""
+        """解析 LLM 返回的 JSON
+
+        分层策略（从窄到宽）：
+        1. 直接 json.loads（纯 JSON）
+        2. 匹配 ```json ... ``` 代码块
+        3. 匹配文本中第一个 { ... } 块（兜底）
+        """
+        if not content:
+            return None
+        content = content.strip()
+        # 1. 直接解析
         try:
             data = json.loads(content)
             if isinstance(data, dict):
                 return data
         except json.JSONDecodeError:
             pass
-        # 尝试从代码块提取
-        match = re.search(r"```(?:json)?\s*([\s\S]*?)```", content)
+        # 2. 匹配 ```json ... ``` 代码块
+        match = re.search(r"```json\s*([\s\S]*?)```", content)
         if match:
             try:
-                data = json.loads(match.group(1))
+                data = json.loads(match.group(1).strip())
+                if isinstance(data, dict):
+                    return data
+            except json.JSONDecodeError:
+                pass
+        # 3. 兜底：匹配文本中第一个 { ... } 块
+        match = re.search(r"\{[\s\S]*?\}", content)
+        if match:
+            try:
+                data = json.loads(match.group())
                 if isinstance(data, dict):
                     return data
             except json.JSONDecodeError:

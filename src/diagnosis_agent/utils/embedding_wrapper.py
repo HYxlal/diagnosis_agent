@@ -56,7 +56,7 @@ class DashScopeEmbeddings(Embeddings):
         if not texts:
             return []
 
-        batch_size = 25
+        batch_size = 10
         all_embeddings = []
 
         for i in range(0, len(texts), batch_size):

@@ -91,6 +91,7 @@ class LangChainDiagnosticAgent:
             max_tokens=settings.context.max_tokens,
         )
         self._last_diagnostic_output: Optional[DiagnosticOutput] = None
+        self._stream_callback = None  # 实时回调，打印 ReAct 步骤
 
     def _build_agent(self):
         """构建并缓存 Agent"""
@@ -233,14 +234,11 @@ class LangChainDiagnosticAgent:
                 parsed_input.bulk_records = convert_result["records"]
             parsed_input.intent = InputIntent.DIAGNOSTIC_QUERY
 
-        # 仅 DIAGNOSTIC_QUERY 做预检索；指令/补充类输入不检索以免污染 prompt 上下文
-        if parsed_input.intent == InputIntent.DIAGNOSTIC_QUERY:
-            similar_cases = self._retrieve_similar_cases(parsed_input)
-        else:
-            similar_cases = []
-
-        has_similar = len(similar_cases) > 0
-        logger.info(f"初始检索到 {len(similar_cases)} 条相似工况")
+        # 检索全部交给 Agent 工具执行，不在主流程做预检索。
+        # 原因：1) 预检索与话题检测的上下文裁剪冲突；
+        #       2) Agent 能根据当前上下文决定是否需要补充检索。
+        similar_cases: list = []
+        has_similar = False
 
         reasoning_result, tool_calls, react_steps = self._run_agent(
             description=description,
@@ -252,23 +250,9 @@ class LangChainDiagnosticAgent:
 
         findings = self._build_findings(reasoning_result, similar_cases)
 
-        # 将检索到的 Document 转为 SimilarCase 模型，供报告展示
-        similar_case_models = [
-            SimilarCase(
-                record_id=doc.metadata.get("id", ""),
-                problem_description=doc.metadata.get("problem_description", ""),
-                root_cause=doc.metadata.get("root_cause", ""),
-                countermeasure=doc.metadata.get("countermeasure", ""),
-                drive_code=doc.metadata.get("drive_code", ""),
-                vehicle_type=doc.metadata.get("vehicle_type", ""),
-                dashboard_indicator=doc.metadata.get("dashboard_indicator", ""),
-                dtc_code=doc.metadata.get("dtc_code", ""),
-                fault_scenario=doc.metadata.get("fault_scenario", ""),
-                similarity=doc.metadata.get("score", 0.0),
-                source=doc.metadata.get("source", "unknown"),
-            )
-            for doc in similar_cases
-        ]
+        # 将工具调用中检索到的 Document 转为 SimilarCase 模型
+        # 优先从 tool_calls 中提取 search/query_fault_graph 的结果
+        similar_case_models = self._extract_similar_cases_from_tools(tool_calls)
 
         tools_used = list(set(tc.tool_name for tc in tool_calls))
 
@@ -282,7 +266,7 @@ class LangChainDiagnosticAgent:
             diagnosis_id=diagnosis_id,
             diagnosis_time=diagnosis_time,
             input_summary=description[:500],
-            has_similar_cases=has_similar,
+            has_similar_cases=len(similar_case_models) > 0,
             similar_cases=similar_case_models,
             findings=findings,
             recommended_countermeasure=countermeasure_text,
@@ -414,17 +398,25 @@ class LangChainDiagnosticAgent:
         invoke_messages = prepare_result.messages
 
         logger.info("开始 Agent 循环")
+        all_messages = list(invoke_messages)
         try:
-            result = self._agent.invoke({"messages": invoke_messages})
+            # 使用 stream 模式，每个 chunk 包含新增的消息
+            last_processed = len(all_messages)
+            for chunk in self._agent.stream({"messages": invoke_messages}, stream_mode="values"):
+                chunk_messages = chunk.get("messages", [])
+                # 打印新增的消息（ReAct 步骤）
+                if self._stream_callback:
+                    for msg in chunk_messages[last_processed:]:
+                        self._stream_callback(msg)
+                last_processed = len(chunk_messages)
+                all_messages = chunk_messages
         except Exception as e:
             logger.error(f"Agent 执行失败: {e}")
             return {}, [], []
 
-        messages = result.get("messages", [])
+        messages = all_messages
         last_message = messages[-1] if messages else None
 
-        # 只保存当前轮新增消息（用户消息 + Agent 产生的 AI/Tool 消息），
-        # 不包含历史。避免轮次间消息重复累积。
         input_len = len(invoke_messages)
         self._last_messages = messages[input_len - 1:] if len(messages) >= input_len else messages
 
@@ -615,18 +607,43 @@ class LangChainDiagnosticAgent:
             "findings": [],
         }
 
-    def _retrieve_similar_cases(self, parsed_input: ParsedInput) -> list[Document]:
-        """使用 HybridRetriever 检索相似工况（两段式）
+    def _extract_similar_cases_from_tools(self, tool_calls: list) -> list[SimilarCase]:
+        """从工具调用结果中提取相似工况"""
+        cases: list[SimilarCase] = []
+        seen_ids = set()
 
-        返回 LangChain Document 列表，保留结构化元数据（id/score/source），
-        调用方需要 IncidentRecord 时通过 document_to_record() 转换。
-        """
-        try:
-            docs = self._retriever.retrieve_parsed(parsed_input)
-            return docs
-        except Exception as e:
-            logger.warning(f"检索失败: {e}")
-            return []
+        for tc in tool_calls:
+            if tc.tool_name not in ("search_similar_incidents", "query_fault_graph"):
+                continue
+            result = tc.result or {}
+            if isinstance(result, str):
+                try:
+                    import json
+                    result = json.loads(result)
+                except json.JSONDecodeError:
+                    continue
+            # 工具返回的格式：`list[dict]`（直接）或 `{"results": [...]}`（包装）
+            items = result if isinstance(result, list) else result.get("results", []) if isinstance(result, dict) else []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                rid = item.get("record_id", item.get("id", ""))
+                if rid in seen_ids:
+                    continue
+                seen_ids.add(rid)
+                cases.append(SimilarCase(
+                    record_id=rid,
+                    problem_description=item.get("problem_description", ""),
+                    root_cause=item.get("root_cause", ""),
+                    countermeasure=item.get("countermeasure", ""),
+                    drive_code=item.get("drive_code", ""),
+                    vehicle_type=item.get("vehicle_type", ""),
+                    dashboard_indicator=item.get("dashboard_indicator", ""),
+                    dtc_code=item.get("dtc_code", ""),
+                    fault_scenario=item.get("fault_scenario", ""),
+                    similarity=item.get("similarity", 0.0),
+                ))
+        return cases
 
     def _build_findings(
         self,

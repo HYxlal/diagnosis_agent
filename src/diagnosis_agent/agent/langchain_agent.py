@@ -579,10 +579,10 @@ class LangChainDiagnosticAgent:
                     obj = json.loads(content) if isinstance(content, str) else content
                     console.print(Syntax(json.dumps(obj, ensure_ascii=False, indent=2), "json", theme="default"))
                 except (TypeError, ValueError, json.JSONDecodeError):
-                    console.print(str(content)[:500])
+                    console.print(str(content)[:2000])
             elif isinstance(msg, AIMessage) and not msg.tool_calls and msg.content:
                 console.print(Panel.fit("[blue]💭 Agent 推理 [/blue]", style="bold blue"))
-                console.print(str(msg.content)[:500])
+                console.print(str(msg.content)[:2000])
 
         self._stream_callback = _on_new_message
 

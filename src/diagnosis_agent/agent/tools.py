@@ -142,8 +142,6 @@ class DiagnosticTools:
                         self._neo4j_available = True
         except Exception:
             logger.info("Neo4j 连接不可达，query_fault_graph 工具已移除")
-        if not self._neo4j_available:
-            logger.info("Neo4j 不可用，query_fault_graph 工具将从工具列表中移除")
 
     def register_working_condition_converter(self, converter: Callable[[str], dict[str, Any]]) -> None:
         """注册工况文件转换工具"""

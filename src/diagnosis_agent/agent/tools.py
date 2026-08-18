@@ -16,7 +16,7 @@ from typing import Any, Callable, Optional
 
 from langchain_core.documents import Document
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..config import Settings
 from ..models.incident import IncidentRecord
@@ -84,6 +84,25 @@ class QueryFaultGraphInput(BaseModel):
         default=10, description="返回数量（可选，默认10）"
     )
 
+    @field_validator('dtc_code', mode='before')
+    @classmethod
+    def _parse_dtc(cls, v: Any) -> Optional[list[str]]:
+        """兼容 LLM 错误传参：将 JSON 字符串或逗号分隔字符串转为 list"""
+        if v is None:
+            return None
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            import json as _json
+            try:
+                parsed = _json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+            except (_json.JSONDecodeError, ValueError):
+                pass
+            return [s.strip() for s in v.split(",") if s.strip()]
+        return None
+
 
 # ------------------------------------------------------------------
 # 工具集类
@@ -109,6 +128,22 @@ class DiagnosticTools:
         )
 
         self._working_condition_converter: Optional[Callable[[str], dict[str, Any]]] = None
+
+        # 检测 Neo4j 可用性（需实际连通）
+        self._neo4j_available = False
+        try:
+            neo4j_attr = getattr(retriever, "neo4j", None)
+            if neo4j_attr is not None and neo4j_attr.available:
+                # 可用性检查：发一条简单查询验证连通性
+                driver = getattr(neo4j_attr, '_driver', None)
+                if driver is not None:
+                    with driver.session(database="neo4j") as session:
+                        session.run("RETURN 1")
+                        self._neo4j_available = True
+        except Exception:
+            logger.info("Neo4j 连接不可达，query_fault_graph 工具已移除")
+        if not self._neo4j_available:
+            logger.info("Neo4j 不可用，query_fault_graph 工具将从工具列表中移除")
 
     def register_working_condition_converter(self, converter: Callable[[str], dict[str, Any]]) -> None:
         """注册工况文件转换工具"""
@@ -275,27 +310,32 @@ class DiagnosticTools:
         - get_incident_detail：工单详情
         - convert_working_condition_file：工况文件转换
         """
-        return [
+        tools = [
             StructuredTool.from_function(
                 func=self._search_similar_incidents_impl,
                 name="search_similar_incidents",
                 description="检索与当前故障相似的历史工单。参数：query（故障描述）、vehicle_type（车型，可选）、top_k（返回数量，可选）。",
                 args_schema=SearchSimilarIncidentsInput,
             ),
-            StructuredTool.from_function(
-                func=self._query_fault_graph_impl,
-                name="query_fault_graph",
-                description=(
-                    "按结构化字段精确查询故障知识图谱。"
-                    "参数：mcuid（MCU标识）、dtc_code（DTC码，多个逗号分隔）、"
-                    "project（项目/车型代号）、component（涉及部件）、"
-                    "working_condition（工作条件）、software_version（软件版本）、"
-                    "depth（关系扩展深度1-2）、top_k（返回数量）。"
-                    "适合用确定的结构化字段（如 DTC、MCU标识）做精确召回。"
-                ),
-                args_schema=QueryFaultGraphInput,
-            ),
-            build_can_converter_tool(),
+        ]
+        if self._neo4j_available:
+            tools.append(
+                StructuredTool.from_function(
+                    func=self._query_fault_graph_impl,
+                    name="query_fault_graph",
+                    description=(
+                        "按结构化字段精确查询故障知识图谱。"
+                        "参数：mcuid（MCU标识）、dtc_code（DTC码，多个逗号分隔）、"
+                        "project（项目/车型代号）、component（涉及部件）、"
+                        "working_condition（工作条件）、software_version（软件版本）、"
+                        "depth（关系扩展深度1-2）、top_k（返回数量）。"
+                        "适合用确定的结构化字段（如 DTC、MCU标识）做精确召回。"
+                    ),
+                    args_schema=QueryFaultGraphInput,
+                )
+            )
+        tools.append(build_can_converter_tool())
+        tools.extend([
             StructuredTool.from_function(
                 func=self._get_incident_detail_impl,
                 name="get_incident_detail",
@@ -308,4 +348,5 @@ class DiagnosticTools:
                 description="将工况文件转换为结构化数据或自然语言描述。参数：file_path（工况文件路径）。",
                 args_schema=ConvertWorkingConditionFileInput,
             ),
-        ]
+        ])
+        return tools

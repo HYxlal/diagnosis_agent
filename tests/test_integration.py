@@ -12,11 +12,19 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from dotenv import load_dotenv
+
+# 加载 .env 确保 API key 可用
+_project_root = Path(__file__).resolve().parents[1]
+_env_path = _project_root / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path)
+
 from diagnosis_agent.models.incident import IncidentRecord
 from diagnosis_agent.storage.chroma_store import ChromaVectorStore
 from diagnosis_agent.retrieval.langchain_retrievers import ChromaVectorRetriever
 from diagnosis_agent.parsers.unified import parse_input
-from diagnosis_agent.config import Settings
+from diagnosis_agent.config import reset_settings, get_settings
 
 
 class TestEndToEnd:
@@ -59,7 +67,7 @@ class TestEndToEnd:
 
         # 3. 检索（使用 ChromaVectorRetriever 替代废弃的 HybridRetriever）
         retriever = ChromaVectorRetriever(
-            store=store, top_k=2, score_threshold=0.0
+            store=store, top_k=2, score_threshold=2.0
         )
         docs = retriever.invoke("发动机故障灯 怠速")
         assert len(docs) > 0
@@ -108,7 +116,13 @@ class TestEndToEnd:
         ]
         store.add_records(records)
 
-        settings = Settings()
+        reset_settings()
+        settings = get_settings()
+
+        # 优先使用可用模型（qwen3.5-plus 实测可用）
+        if settings.llm.model in ("qwen-long", "qwen-plus", "qwen3.7-max"):
+            settings.llm.model = "qwen3.5-plus"
+
         agent = LangChainDiagnosticAgent(settings=settings)
 
         parsed = parse_input(text="发动机故障灯亮了，怠速不稳")

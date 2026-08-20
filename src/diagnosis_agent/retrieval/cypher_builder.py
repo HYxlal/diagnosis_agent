@@ -58,13 +58,13 @@ class _QueryBuilder:
         return name
 
     def _build_motor(self, values: List[str]) -> None:
-        # f 必须有一条 OCCURS_ON → MotorType 的关系，且 motor code 模糊匹配
+        # f 必须有一条 出现于 → MotorType 的关系，且 motor code 模糊匹配
         parts = []
         for v in values:
             name = self._add_param(v)
             parts.append(f"m.code CONTAINS ${name}")
         self._where_clauses.append(
-            f"EXISTS {{ MATCH (f)-[:OCCURS_ON]->(m:MotorType) WHERE {' OR '.join(parts)} }}"
+            f"EXISTS {{ MATCH (f)-[:出现于]->(m:MotorType) WHERE {' OR '.join(parts)} }}"
         )
 
     def _build_vehicle(self, values: List[str]) -> None:
@@ -73,7 +73,7 @@ class _QueryBuilder:
             name = self._add_param(v)
             parts.append(f"v.type CONTAINS ${name}")
         self._where_clauses.append(
-            f"EXISTS {{ MATCH (f)-[:OCCURS_ON_VEHICLE]->(v:VehicleType) WHERE {' OR '.join(parts)} }}"
+            f"EXISTS {{ MATCH (f)-[:出现于]->(m:MotorType)<-[:配备]-(v:VehicleType) WHERE {' OR '.join(parts)} }}"
         )
 
     def _build_indicator(self, values: List[str]) -> None:
@@ -82,7 +82,7 @@ class _QueryBuilder:
             name = self._add_param(v)
             parts.append(f"i.name CONTAINS ${name}")
         self._where_clauses.append(
-            f"EXISTS {{ MATCH (f)-[:SHOWS_INDICATOR]->(i:Indicator) WHERE {' OR '.join(parts)} }}"
+            f"EXISTS {{ MATCH (f)-[:亮起]->(i:Indicator) WHERE {' OR '.join(parts)} }}"
         )
 
     def _build_dtc(self, values: List[str]) -> None:
@@ -102,7 +102,7 @@ class _QueryBuilder:
                 parts.append(f"d.description CONTAINS ${name}")
         if parts:
             self._where_clauses.append(
-                f"EXISTS {{ MATCH (f)-[:HAS_DTC]->(d:DTC) WHERE {' OR '.join(parts)} }}"
+                f"EXISTS {{ MATCH (f)-[:关联DTC]->(d:DTC) WHERE {' OR '.join(parts)} }}"
             )
 
     def _build_scenario(self, values: List[str]) -> None:
@@ -127,12 +127,12 @@ class _QueryBuilder:
                     conds.append(f"s.detail = ${name}")
                 if conds:
                     parts.append(
-                        f"EXISTS {{ MATCH (f)-[:OCCURS_IN_SCENARIO]->(s:Scenario) WHERE {' AND '.join(conds)} }}"
+                        f"EXISTS {{ MATCH (f)-[:发生于]->(s:Scenario) WHERE {' AND '.join(conds)} }}"
                     )
             else:
                 name = self._add_param(v_clean)
                 parts.append(
-                    f"EXISTS {{ MATCH (f)-[:OCCURS_IN_SCENARIO]->(s:Scenario) "
+                    f"EXISTS {{ MATCH (f)-[:发生于]->(s:Scenario) "
                     f"WHERE s.category CONTAINS ${name} "
                     f"OR s.subcategory CONTAINS ${name} "
                     f"OR s.detail CONTAINS ${name} }}"

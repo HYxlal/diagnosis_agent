@@ -78,7 +78,7 @@ class TestChromaVectorRetriever:
         store.add_records(sample_records)
 
         retriever = ChromaVectorRetriever(
-            store=store, top_k=3, score_threshold=0.0
+            store=store, top_k=3, score_threshold=2.0
         )
         docs = retriever.invoke("发动机故障灯")
         assert len(docs) > 0
@@ -106,7 +106,7 @@ class TestChromaVectorRetriever:
         store.add_records(sample_records)
 
         retriever = ChromaVectorRetriever(
-            store=store, top_k=3, score_threshold=0.0
+            store=store, top_k=3, score_threshold=2.0
         )
         docs = retriever.search_with_filters(
             query="发动机故障灯 怠速",

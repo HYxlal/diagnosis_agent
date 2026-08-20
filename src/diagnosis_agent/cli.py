@@ -36,6 +36,7 @@ from .parsers.unified import parse_input
 from .reporting.entries import generate_both as generate_db_entries
 from .reporting.markdown import generate_markdown_report
 from .storage.chroma_store import ChromaVectorStore
+from .knowledge.cli import knowledge_app
 
 SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
 PROCESSED_DIR_NAME = "processed"
@@ -45,6 +46,9 @@ app = typer.Typer(
     help="车辆故障诊断 Agent — 基于向量检索 + LLM 推理",
     no_args_is_help=True,
 )
+
+# 注册知识沉淀命令组
+app.add_typer(knowledge_app, name="knowledge", help="知识沉淀管理")
 
 console = Console()
 
@@ -209,6 +213,68 @@ def _load_standard_input(json_input: str) -> StandardInput:
         raise typer.Exit(1)
 
 
+def _auto_extract_knowledge(
+    current_messages: list[dict],
+    session_id: str,
+    settings: "Settings",
+) -> None:
+    """自动提取本轮对话知识并提交审核
+
+    从当前消息列表中提取 user/assistant 消息对，调用 knowledge 模块
+    提取实体关系、提交审核。提取失败不阻塞主流程。
+    """
+    try:
+        from langchain_openai import ChatOpenAI
+        from .knowledge import ConversationKnowledgeExtractor
+        from .knowledge.graph_writer import GraphWriter
+        from .knowledge.edit_manager import ManualEditManager
+        from .retrieval.neo4j_retriever import Neo4jFaultRetriever
+
+        k_llm = ChatOpenAI(
+            model=settings.knowledge.extraction_model,
+            temperature=0.0,
+            max_tokens=1024,
+            api_key=settings.llm.api_key,
+            base_url=settings.llm.api_base,
+        )
+        k_neo4j = Neo4jFaultRetriever(settings=settings)
+        k_graph_writer = None
+        k_edit_manager = None
+        try:
+            from langchain_neo4j import Neo4jGraph
+            if k_neo4j.available:
+                k_graph = Neo4jGraph(
+                    url=settings.neo4j.url,
+                    username=settings.neo4j.user,
+                    password=settings.neo4j.password,
+                    database="neo4j",
+                )
+                k_edit_manager = ManualEditManager(graph=k_graph)
+                k_graph_writer = GraphWriter(graph=k_graph, edit_manager=k_edit_manager)
+        except Exception:
+            pass
+        k_extractor = ConversationKnowledgeExtractor(
+            llm=k_llm,
+            graph_writer=k_graph_writer,
+            edit_manager=k_edit_manager,
+            persistence_path=settings.knowledge.persistence_dir + "/" + settings.knowledge.persistence_file,
+            tuple_delimiter=settings.knowledge.tuple_delimiter,
+            record_delimiter=settings.knowledge.record_delimiter,
+            completion_delimiter=settings.knowledge.completion_delimiter,
+        )
+        k_messages = [
+            m for m in current_messages
+            if m.get("type") in ("human", "ai")
+            or m.get("role") in ("user", "assistant")
+        ][-4:]
+        if k_messages:
+            kid = k_extractor.extract_and_submit(k_messages, session_id)
+            if kid:
+                console.print(f"  [dim]知识已提交审核: {kid[:12]}...[/dim]")
+    except Exception:
+        logger.warning("知识提取失败，不影响主流程", exc_info=True)
+
+
 def _run_standard_diagnosis(
     standard_input: StandardInput,
     output_dir: str,
@@ -224,13 +290,14 @@ def _run_standard_diagnosis(
     from .agent.context_manager import SimpleContextManager
     from .agent.context.summarizer import Summarizer
     from .agent.context.topic_detector import TopicDetector
+    from .agent.context.adaptive_window import AdaptiveWindowManager
 
     session_manager = SessionManager()
     session_id = standard_input.session_id or ""
 
     settings = get_settings()
 
-    # 初始化上下文管理器（含摘要+话题检测）
+    # 初始化上下文管理器（含摘要+话题检测+自适应窗口）
     context_manager = SimpleContextManager(
         window_size=settings.context.window_size,
         max_tokens=settings.context.max_tokens,
@@ -254,6 +321,13 @@ def _run_standard_diagnosis(
             scope_out_keywords=settings.context.scope_out_keywords,
         ) if settings.context.topic_detection_enabled else None,
         emergency_min_turns=settings.context.emergency_min_turns,
+        adaptive_window_manager=AdaptiveWindowManager(
+            initial_window=settings.context.window_size,
+            min_window=settings.context.adaptive_window.min_window,
+            max_window=settings.context.adaptive_window.max_window,
+            target_utilization=settings.context.adaptive_window.target_utilization,
+            adjustment_interval=settings.context.adaptive_window.adjustment_interval,
+        ) if settings.context.adaptive_window.enabled else None,
     )
 
     # 构建多轮上下文（三步降级 + 摘要注入）
@@ -294,6 +368,10 @@ def _run_standard_diagnosis(
         from langchain_core.messages import messages_to_dict
         current_messages = messages_to_dict(getattr(agent, "_last_messages", []))
         session_manager.update(session_id, standard_input.raw_query, current_messages)
+
+        # 自动提取本轮对话知识
+        if settings.knowledge.enabled and current_messages:
+            _auto_extract_knowledge(current_messages, session_id, settings)
 
     if standard_output.code == 0:
         console.print(Panel.fit("✅ 诊断完成", style="bold green"))
@@ -371,6 +449,16 @@ def _run_traditional_diagnosis(
     except Exception as e:
         console.print(f"[red]诊断失败: {e}[/red]")
         raise typer.Exit(1)
+
+    # 自动提取本轮对话知识
+    if settings.knowledge.enabled:
+        try:
+            from langchain_core.messages import messages_to_dict
+            current_messages = messages_to_dict(getattr(agent, "_last_messages", []))
+            if current_messages:
+                _auto_extract_knowledge(current_messages, "", settings)
+        except Exception:
+            logger.warning("知识提取失败，不影响主流程", exc_info=True)
 
     if generate_md:
         md_path = generate_markdown_report(output, output_dir=output_dir)
@@ -713,8 +801,9 @@ def chat(
     from .agent.context_manager import SimpleContextManager
     from .agent.context.summarizer import Summarizer
     from .agent.context.topic_detector import TopicDetector
+    from .agent.context.adaptive_window import AdaptiveWindowManager
 
-    # 初始化上下文管理器
+    # 初始化上下文管理器（含自适应窗口）
     context_manager = SimpleContextManager(
         window_size=settings.context.window_size,
         max_tokens=settings.context.max_tokens,
@@ -738,42 +827,84 @@ def chat(
             scope_out_keywords=settings.context.scope_out_keywords,
         ) if settings.context.topic_detection_enabled else None,
         emergency_min_turns=settings.context.emergency_min_turns,
+        adaptive_window_manager=AdaptiveWindowManager(
+            initial_window=settings.context.window_size,
+            min_window=settings.context.adaptive_window.min_window,
+            max_window=settings.context.adaptive_window.max_window,
+            target_utilization=settings.context.adaptive_window.target_utilization,
+            adjustment_interval=settings.context.adaptive_window.adjustment_interval,
+        ) if settings.context.adaptive_window.enabled else None,
     )
+
+    # 启动 Prometheus HTTP 端点（后台线程）
+    from .agent.context.metrics import metrics
+    http_port = 9090
+    if metrics.start_http_server(port=http_port):
+        console.print(f"  [dim]📊 指标端点: http://localhost:{http_port}/metrics[/dim]")
+    else:
+        console.print(f"  [dim]📊 指标端点: http://localhost:{http_port}/metrics (端口被占用，跳过)[/dim]")
 
     console.print(Panel.fit("🔍 故障诊断 Agent — 交互模式", style="bold blue"))
     _print_model_status(settings)
 
     sess_id = session_id or f"chat-{uuid.uuid4().hex[:8]}"
     agent = LangChainDiagnosticAgent(settings=settings, report_mode=generate_md)
+    agent.show_tool_details = settings.tool_call.show_details
     sm = SessionManager()
 
     console.print(f"  MCU: [cyan]{mcuid}[/cyan]")
     console.print(f"  会话: [dim]{sess_id}[/dim] (输入 exit/quit/q 退出)")
 
-    # 恢复历史会话：显示完整历史消息和诊断结果
+    # 更新会话统计
+    metrics.record_session()
+    stats = sm.get_metrics()
+    metrics.update_session_stats(stats["active_sessions"], stats["avg_turns"])
+
+    # 恢复历史会话：/resume 风格完整展示所有历史对话 + Token 状态
     ctx = sm.get_conversation_context(sess_id)
     if ctx and ctx.total_turns > 0:
-        console.print(f"  [dim]已恢复 {ctx.total_turns} 轮历史[/dim]")
+        from rich.table import Table
+        console.print(f"\n  [bold cyan]📜 已恢复历史会话（共 {ctx.total_turns} 轮）[/bold cyan]")
+
+        # 显示 Token 预算状态
+        current_util = ctx.metadata.get("window_utilization", 0.0) if ctx.metadata else 0.0
+        current_tokens = ctx.metadata.get("token_usage", 0) if ctx.metadata else 0
+        max_toks = ctx.metadata.get("max_tokens", 0) if ctx.metadata else settings.context.max_tokens
+        hot_count = len(ctx.hot_messages)
+        summary_count = len(ctx.warm_summaries)
+        console.print(f"  Token 预算: [cyan]{current_tokens}[/cyan]/[dim]{max_toks}[/dim] 用量: [cyan]{current_util:.0%}[/cyan]  | 热层: {hot_count} 条 | 温层: {summary_count} 个")
+
+        # 分层展示：温层摘要 + 热层完整对话
         if ctx.warm_summaries:
-            for s in ctx.warm_summaries:
-                console.print(f"    [dim]├─ [{s.topic_label}] {s.summary[:80]}...[/dim]")
-        # 从 metadata.diagnosis_history 显示历史诊断结果
-        diag_history = ctx.metadata.get("diagnosis_history", [])
-        for idx, d in enumerate(diag_history, 1):
-            cl = d.get("classification", "")
-            rc = d.get("root_cause", "")
-            sl = d.get("solution", "")
-            cf = d.get("confidence", 0)
-            sc = d.get("similar_count", 0)
-            console.print(f"    [dim]第{idx}轮 🤖 分类: {cl} | 根因: {rc[:60]}...[/dim]")
-            console.print(f"    [dim]            方案: {sl[:60]}... (置信度: {cf:.0%}, 相似工况: {sc} 条)[/dim]")
-        # 显示最后一条用户消息
+            t = Table(title="温层摘要（已合并的历史话题）", show_header=True, header_style="bold dim")
+            t.add_column("#", style="dim", width=3)
+            t.add_column("话题", width=12)
+            t.add_column("摘要内容", width=60)
+            for i, s in enumerate(ctx.warm_summaries, 1):
+                t.add_row(str(i), s.topic_label or "-", s.summary[:70] + ("..." if len(s.summary) > 70 else ""))
+            console.print(t)
+
+        # 完整展示所有热层历史消息（用户提问 + 助手回复）
         if ctx.hot_messages:
-            for msg in reversed(ctx.hot_messages):
-                if isinstance(msg, dict) and msg.get("type") == "human":
-                    content = msg.get("data", {}).get("content", "")
-                    console.print(f"    [dim]└─ 最后提问: {content[:60]}...[/dim]")
-                    break
+            console.print(f"\n  [bold]完整历史对话[/bold]")
+            for msg in ctx.hot_messages:
+                role = msg.get("role") or msg.get("type", "unknown")
+                content = ""
+                if isinstance(msg, dict):
+                    if "content" in msg:
+                        content = str(msg.get("content", ""))
+                    elif "data" in msg and isinstance(msg["data"], dict):
+                        content = str(msg["data"].get("content", ""))
+                if not content:
+                    continue
+                if role in ("human", "user"):
+                    console.print(f"\n  [green]👤 用户[/green]")
+                    console.print(f"  {content}")
+                elif role in ("ai", "assistant"):
+                    console.print(f"\n  [blue]🤖 诊断助手[/blue]")
+                    console.print(f"  {content}")
+        else:
+            console.print(f"  [dim]（历史消息已归档至冷层，摘要信息如上）[/dim]")
     console.print()
 
     round_num = sm.get_round_count(sess_id) + 1
@@ -801,7 +932,9 @@ def chat(
         if prepared and prepared.metadata.topic_changed:
             old_sess_id = sess_id
             new_sess_id = f"{old_sess_id}-topic-{sm.get_round_count(old_sess_id) + 1}"
+            # 先归档完整会话（含热层消息），再清空热层为新话题准备
             sm.archive(old_sess_id)
+            ctx.hot_messages = []
             _current_sess_id[0] = new_sess_id
             sess_id = new_sess_id
             console.print(f"  [dim]话题已切换，旧会话 {old_sess_id} 已归档，新会话 {new_sess_id}[/dim]")
@@ -817,21 +950,8 @@ def chat(
                 standard_input=standard_input,
             )
         else:
-            # 设置实时回调，流式打印 ReAct 步骤
-            def _stream_print(msg):
-                if hasattr(msg, 'content') and isinstance(msg.content, str) and msg.content:
-                    # 跳过工具返回的原始 JSON
-                    skip_types = getattr(msg, 'additional_kwargs', {})
-                    if skip_types.get('tool_calls'):
-                        return
-                    content = msg.content.strip()
-                    if content and len(content) < 500:
-                        console.print(f"  [dim]💭 {content[:120]}...[/dim]" if len(content) > 120 else f"  [dim]💭 {content}[/dim]")
-                elif hasattr(msg, 'tool_call_id') and hasattr(msg, 'content'):
-                    obs = str(msg.content)[:120]
-                    console.print(f"  [dim]👁 {obs}...[/dim]")
-
-            agent._stream_callback = _stream_print
+            # 启用流式打印 ReAct 步骤
+            agent._enable_react_stream()
             standard_output = agent.diagnose_with_standard_input(
                 standard_input,
                 prepared_messages=prepared.messages if prepared else None,
@@ -842,6 +962,20 @@ def chat(
             from langchain_core.messages import messages_to_dict
             current_messages = messages_to_dict(getattr(agent, "_last_messages", []))
             sm.update(sess_id, query, current_messages)
+
+            # 获取更新后的上下文，显示当前 Token 用量
+            ctx_after = sm.get_conversation_context(sess_id)
+            meta = prepared.metadata if prepared else None
+            used_toks = meta.token_usage if meta else 0
+            max_toks_ctx = meta.max_tokens if meta else settings.context.max_tokens
+            util_ctx = meta.window_utilization if meta else 0.0
+            hot_count = len(ctx_after.hot_messages) if ctx_after else 0
+            summary_count = len(ctx_after.warm_summaries) if ctx_after else 0
+
+            # 自动提取本轮对话知识
+            if settings.knowledge.enabled and current_messages:
+                _auto_extract_knowledge(current_messages, sess_id, settings)
+
             result = standard_output.diagnosis_result
             if result:
                 similar_count = 0
@@ -854,6 +988,7 @@ def chat(
                 console.print(f"  [cyan]根因:[/cyan] {result.fault_root_cause[0] if result.fault_root_cause else 'N/A'}")
                 console.print(f"  [cyan]方案:[/cyan] {result.solution[0] if result.solution else 'N/A'}")
                 console.print(f"  [cyan]置信度:[/cyan] {standard_output.diagnosis_confidence:.0%}")
+                console.print(f"  [dim]Token 用量: {used_toks}/{max_toks_ctx} ({util_ctx:.0%}) | 热层消息: {hot_count} | 温层摘要: {summary_count}[/dim]")
                 console.print()
                 # 把格式化结果存入 metadata，恢复时可直接显示（不干扰 hot_messages 序列化）
                 ctx = sm.get_conversation_context(sess_id)
@@ -925,9 +1060,24 @@ def chat(
             sm.archive(_current_sess_id[0])
             console.print(f"[dim]已退出，会话 {_current_sess_id[0]} 共 {round_num - 1} 轮（已归档）[/dim]")
             break
+        if user_input.lower() == "/tool":
+            agent.show_tool_details = not agent.show_tool_details
+            settings.tool_call.show_details = agent.show_tool_details
+            status = "开启" if agent.show_tool_details else "关闭"
+            console.print(f"[dim]工具调用详情已{status}[/dim]")
+            continue
 
         _idle_reset.set()
         _do_chat_round(user_input, mcuid, round_num)
+
+        # 显示指标面板
+        metrics.record_turn()
+        stats = sm.get_metrics()
+        metrics.update_session_stats(stats["active_sessions"], stats["avg_turns"])
+        panel_text = metrics.render_panel()
+        if panel_text:
+            console.print(Panel(panel_text, title="📊 运行指标", style="dim"))
+
         round_num += 1
 
 
@@ -1045,6 +1195,72 @@ def session_archive(
         console.print(f"[green]✅ 会话 {session_id} 已归档 ({result.total_turns} 轮)[/green]")
     else:
         console.print(f"[red]❌ 归档失败: 会话 {session_id} 不存在[/red]")
+
+
+@app.command()
+def session_audit(
+    session_id: Optional[str] = typer.Argument(None, help="会话 ID（不指定则列出所有有审计日志的会话）"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
+):
+    """查看审计日志"""
+    _setup_logging(verbose)
+    from .agent.context.audit import audit
+
+    if session_id:
+        events = audit.read_logs(session_id)
+        console.print(Panel.fit(f"📋 审计日志: {session_id}", style="bold blue"))
+        if not events:
+            console.print("  无审计日志")
+        else:
+            table = Table(show_header=True, header_style="bold cyan")
+            table.add_column("时间", width=22)
+            table.add_column("事件", style="bold", width=14)
+            table.add_column("详情", width=60)
+            for e in events:
+                ts = e.get("_timestamp", "")[:19]
+                event = e.get("event", "")
+                detail = ", ".join(
+                    f"{k}={v}" for k, v in e.items()
+                    if k not in ("event", "session_id", "_timestamp")
+                )
+                table.add_row(ts, event, detail[:58])
+            console.print(table)
+            console.print(f"  共 {len(events)} 条记录")
+    else:
+        sessions = audit.list_sessions()
+        console.print(Panel.fit("📋 审计日志会话列表", style="bold blue"))
+        if not sessions:
+            console.print("  无审计日志")
+        else:
+            for sid in sessions:
+                events = audit.read_logs(sid)
+                console.print(f"  [cyan]{sid}[/cyan] — {len(events)} 条记录")
+
+
+@app.command()
+def session_cleanup(
+    confirm: bool = typer.Option(False, "--confirm", "-y", help="确认清理"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
+):
+    """手动清理过期归档"""
+    _setup_logging(verbose)
+    if not confirm:
+        console.print("[yellow]请使用 --confirm 确认清理操作[/yellow]")
+        raise typer.Exit(1)
+
+    from .agent.retention import RetentionPolicy
+    settings = get_settings()
+    rt = settings.context.retention
+    policy = RetentionPolicy(
+        archive_dir="data/sessions/archive",
+        retention_days=rt.retention_days,
+        max_archive_size_mb=rt.max_archive_size_mb,
+    )
+    result = policy.cleanup()
+    console.print(Panel.fit("🧹 归档清理完成", style="bold blue"))
+    console.print(f"  删除文件: {result['deleted_files']}")
+    console.print(f"  释放空间: {result['freed_bytes'] / 1024 / 1024:.1f} MB")
+    console.print(f"  剩余文件: {result['remaining_files']}")
 
 
 def main():

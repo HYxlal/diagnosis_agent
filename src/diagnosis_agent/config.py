@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 class LLMConfig(BaseModel):
-    model: str = "qwen-plus"
+    model: str = "qwen-long"
     temperature: float = 0.3
     max_tokens: int = 4096
     api_key: str = ""
@@ -44,7 +44,7 @@ class VectorStoreConfig(BaseModel):
 
 class SemanticRetrievalConfig(BaseModel):
     top_k: int = 5
-    score_threshold: float = 0.3
+    score_threshold: float = 0.6
 
 
 class HybridRetrievalConfig(BaseModel):
@@ -146,12 +146,52 @@ class ContextConfig(BaseModel):
     # ── Redis 存储配置 ──
     redis: "RedisConfig" = Field(default_factory=lambda: RedisConfig())
 
+    # ── 自适应窗口配置 ──
+    adaptive_window: "AdaptiveWindowConfig" = Field(default_factory=lambda: AdaptiveWindowConfig())
+
+    # ── 数据保留策略配置 ──
+    retention: "RetentionConfig" = Field(default_factory=lambda: RetentionConfig())
+
 
 class RedisConfig(BaseModel):
     """Redis 存储配置 — 热层/温层持久化"""
     enabled: bool = False
     url: str = "redis://localhost:6379/0"
     key_prefix: str = "session:"
+
+
+class AdaptiveWindowConfig(BaseModel):
+    """自适应窗口配置 — 根据 Token 利用率动态调整窗口大小"""
+    enabled: bool = True
+    min_window: int = 2
+    max_window: int = 20
+    target_utilization: float = 0.75
+    adjustment_interval: int = 10
+
+
+class RetentionConfig(BaseModel):
+    """数据保留策略配置"""
+    retention_days: int = 30
+    max_archive_size_mb: int = 500
+    cleanup_interval_hours: int = 24
+
+
+class KnowledgeConfig(BaseModel):
+    """知识沉淀配置"""
+    enabled: bool = True
+    persistence_dir: str = "cache"
+    persistence_file: str = "conversation_knowledge.json"
+    extraction_model: str = "deepseek-v3.1"
+    tuple_delimiter: str = ":"
+    record_delimiter: str = ")"
+    completion_delimiter: str = "返回空列表"
+    web_username: str = ""
+    web_password: str = ""
+
+
+class ToolCallConfig(BaseModel):
+    """工具调用展示配置"""
+    show_details: bool = True
 
 
 class Settings(BaseModel):
@@ -165,6 +205,8 @@ class Settings(BaseModel):
     report: ReportConfig = Field(default_factory=ReportConfig)
     neo4j: Neo4jConfig = Field(default_factory=Neo4jConfig)
     context: ContextConfig = Field(default_factory=ContextConfig)
+    knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
+    tool_call: ToolCallConfig = Field(default_factory=ToolCallConfig)
 
 
 # ---------------------------------------------------------------------------

@@ -43,7 +43,9 @@ def build_no_similar_case_prompt(
 
 ## 预检索结果
 
-预检索用户语句未能找到相似历史工单，如果觉得需要，可以自行编辑更精准的检索词调用 search_similar_incidents 或 query_fault_graph 补充检索，无论找到与否，都请基于你的专业领域知识进行诊断推理。"""
+预检索用户语句未能找到相似历史工单，如果觉得需要，可以自行编辑更精准的检索词调用 search_similar_incidents 或 query_fault_graph 补充检索，无论找到与否，都请基于你的专业领域知识进行诊断推理。
+
+**重要：由于未找到相似历史工单，诊断缺乏历史数据支撑，confidence 不可超过 0.5。**"""
 
 
 def format_similar_cases_for_prompt(cases: list) -> str:
@@ -60,7 +62,7 @@ def format_similar_cases_for_prompt(cases: list) -> str:
         meta = doc.metadata
         lines.append(
             f"**工单 {i}** (ID: {meta.get('id', 'N/A')}, "
-            f"相似度: {meta.get('score', 0):.2f})"
+            f"相似度: {1 - meta.get('score', 0):.2f})"
         )
         lines.append(f"  - 问题描述: {meta.get('problem_description', 'N/A')}")
         lines.append(f"  - 根本原因: {meta.get('root_cause', 'N/A')}")

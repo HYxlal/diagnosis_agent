@@ -1,0 +1,108 @@
+{
+  "pending_reviews": [],
+  "processed_knowledge": {
+    "10aa087f-ff2b-4f7b-89c1-6313fe836ca8": {
+      "knowledge_id": "10aa087f-ff2b-4f7b-89c1-6313fe836ca8",
+      "conversation_id": "test",
+      "extracted_entities": [
+        {
+          "entity_id": "84125143-3126-42ad-b0e5-55c6a9b75d14",
+          "entity_name": "E",
+          "entity_type": "测试",
+          "description": ""
+        }
+      ],
+      "extracted_relationships": [
+        {
+          "source_id": "E",
+          "target_id": "F",
+          "relation_type": "导致",
+          "description": "",
+          "weight": 0.5
+        }
+      ],
+      "conversation_context": "",
+      "status": "approved",
+      "reviewer": "牛舒衡",
+      "review_time": "2026-08-18T16:08:08.211415",
+      "review_comment": "通过",
+      "created_at": "2026-08-18T16:08:08.210163"
+    },
+    "1d2bd153-a438-40c6-a1cf-019f05e5d92e": {
+      "knowledge_id": "1d2bd153-a438-40c6-a1cf-019f05e5d92e",
+      "conversation_id": "",
+      "extracted_entities": [
+        {
+          "entity_id": "d9091fc3-2972-470b-b4b9-c42fa7e457a3",
+          "entity_name": "T",
+          "entity_type": "测试",
+          "description": ""
+        }
+      ],
+      "extracted_relationships": [],
+      "conversation_context": "",
+      "status": "rejected",
+      "reviewer": "审核员",
+      "review_time": "2026-08-18T16:08:08.212631",
+      "review_comment": "不准",
+      "created_at": "2026-08-18T16:08:08.212072"
+    },
+    "59e02ddb-62f8-4b71-946e-2a97454ee53c": {
+      "knowledge_id": "59e02ddb-62f8-4b71-946e-2a97454ee53c",
+      "conversation_id": "",
+      "extracted_entities": [
+        {
+          "entity_id": "30b8d851-16ab-4f7b-85b6-bc82c7be55a4",
+          "entity_name": "T-AC7",
+          "entity_type": "测试",
+          "description": ""
+        }
+      ],
+      "extracted_relationships": [],
+      "conversation_context": "",
+      "status": "pending",
+      "reviewer": null,
+      "review_time": null,
+      "review_comment": null,
+      "created_at": "2026-08-18T16:08:08.213138"
+    },
+    "5653aa7a-fec0-447a-a71b-c04d67a48b7b": {
+      "knowledge_id": "5653aa7a-fec0-447a-a71b-c04d67a48b7b",
+      "conversation_id": "ac7",
+      "extracted_entities": [
+        {
+          "entity_id": "ace9f1f8-486e-49ac-b227-613502c57d49",
+          "entity_name": "T-AC7-ENT",
+          "entity_type": "测试",
+          "description": "写入实体"
+        }
+      ],
+      "extracted_relationships": [
+        {
+          "source_id": "T-AC7-ENT",
+          "target_id": "T-AC7-REL",
+          "relation_type": "属于",
+          "description": "",
+          "weight": 0.7
+        }
+      ],
+      "conversation_context": "",
+      "status": "approved",
+      "reviewer": "牛舒衡",
+      "review_time": "2026-08-18T16:08:08.213489",
+      "review_comment": "",
+      "created_at": "2026-08-18T16:08:08.213468"
+    }
+  },
+  "stats": {
+    "extractions": 0,
+    "entities_extracted": 0,
+    "relationships_extracted": 0,
+    "submitted_for_review": 2,
+    "approved_knowledge": 2,
+    "rejected_knowledge": 1,
+    "errors": 0,
+    "merged_entities": 0
+  },
+  "saved_at": "2026-08-18T16:08:08.213606"
+}

@@ -45,7 +45,7 @@ class StandardEntities(BaseModel):
     )
     component: str = Field(
         "",
-        description="涉及的部件",
+        description="涉及的部件/根因",
         examples=["IGBT/MCU"],
     )
     working_condition: str = Field(

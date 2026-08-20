@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .context.types import ConversationContext
+from .context.audit import audit as _audit
+from .retention import RetentionPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +187,24 @@ class SessionManager:
                         )
                     self._idle_timeout = settings.context.session_idle_timeout
                     self._max_lifetime = settings.context.session_max_lifetime
+                    # 启动数据保留策略定时清理
+                    try:
+                        from ..config import RetentionConfig
+                        rt = settings.context.retention
+                        self._retention = RetentionPolicy(
+                            archive_dir=f"{persist_dir}/archive",
+                            retention_days=rt.retention_days,
+                            max_archive_size_mb=rt.max_archive_size_mb,
+                            cleanup_interval_hours=rt.cleanup_interval_hours,
+                        )
+                        self._retention.start_scheduled()
+                        logger.info(
+                            f"数据保留策略已启动: {rt.retention_days} 天, "
+                            f"{rt.max_archive_size_mb} MB, "
+                            f"每 {rt.cleanup_interval_hours} 小时清理"
+                        )
+                    except Exception as e:
+                        logger.warning(f"数据保留策略启动失败: {e}")
                 except Exception as e:
                     logger.warning(f"SessionManager 初始化 Redis 失败: {e}")
 
@@ -266,6 +286,7 @@ class SessionManager:
         """创建新会话（状态: created）"""
         ctx = ConversationContext.create_new(session_id)
         ctx.status = "created"
+        _audit.log_session_create(session_id)
         return ctx
 
     def _check_expired(self, ctx: ConversationContext) -> bool:
@@ -329,6 +350,7 @@ class SessionManager:
                 json.dump(archived.to_dict(), f, ensure_ascii=False, indent=2)
             if self._redis_store:
                 self._redis_store.delete(ctx.session_id)
+            _audit.log_archive(ctx.session_id, ctx.total_turns, duration)
             logger.info(f"会话 {ctx.session_id} 已自动归档（{ctx.total_turns} 轮）")
         except OSError as e:
             logger.warning(f"归档会话 {ctx.session_id} 失败: {e}")
@@ -688,3 +710,25 @@ class SessionManager:
         if (self._archive_dir() / f"{session_id}.json").exists():
             return "archived"
         return "unknown"
+
+    def get_metrics(self) -> dict:
+        """获取全局会话统计指标（供 4.1 监控面板使用）
+
+        Returns:
+            dict with active_sessions, total_turns, total_sessions, avg_turns
+        """
+        active = self.list_active()
+        total_turns = 0
+        total_sessions = len(active)
+        for sid in active:
+            ctx = self._sessions.get(sid)
+            if ctx is None and self._redis_store:
+                ctx = self._redis_store.load(sid)
+            if ctx:
+                total_turns += ctx.total_turns
+        return {
+            "active_sessions": len(active),
+            "total_turns": total_turns,
+            "total_sessions": total_sessions,
+            "avg_turns": total_turns / max(1, total_sessions),
+        }

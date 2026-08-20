@@ -26,12 +26,30 @@ class ChromaVectorRetriever(BaseRetriever):
     """基于 ChromaVectorStore 的向量检索器
 
     继承 BaseRetriever，获得标准接口和 LangChain 生态支持。
-    。
     """
 
     store: ChromaVectorStore
     top_k: int = 5
-    score_threshold: float = 0.3
+    score_threshold: float = 0.6
+
+    def _filter_and_wrap_results(self, results: list) -> list[Document]:
+        """统一阈值过滤 + SearchResult → Document 转换逻辑
+
+        Chroma 返回的是 cosine distance（值越小越相似），统一在此处做 <= 阈值判断。
+        所有上层调用方无需再写 score 判断，彻底避免方向写反的重复错误。
+        """
+        docs = []
+        for result in results:
+            # 阈值判断全局唯一入口：cosine distance <= 阈值 → 通过
+            if result.score <= self.score_threshold:
+                metadata = result.metadata.copy()
+                metadata["id"] = result.id
+                metadata["score"] = result.score
+                docs.append(Document(
+                    page_content=result.content,
+                    metadata=metadata,
+                ))
+        return docs
 
     def _get_relevant_documents(self, query: str) -> list[Document]:
         """语义检索（同步）"""
@@ -40,24 +58,11 @@ class ChromaVectorRetriever(BaseRetriever):
                 query=query,
                 top_k=self.top_k,
             )
-
-            filtered = []
-            for result in results:
-                if result.score >= self.score_threshold:
-                    metadata = result.metadata.copy()
-                    metadata["id"] = result.id
-                    metadata["score"] = result.score
-                    doc = Document(
-                        page_content=result.content,
-                        metadata=metadata,
-                    )
-                    filtered.append(doc)
-
+            filtered = self._filter_and_wrap_results(results)
             logger.info(
                 f"语义检索: query='{query[:50]}...', "
                 f"返回 {len(filtered)}/{len(results)} 条 (阈值={self.score_threshold})"
             )
-
             return filtered
         except Exception as e:
             logger.error(f"语义检索失败: {e}")
@@ -88,20 +93,7 @@ class ChromaVectorRetriever(BaseRetriever):
                 top_k=k,
                 filters=filters if filters else None,
             )
-
-            filtered = []
-            for result in results:
-                if result.score >= self.score_threshold:
-                    metadata = result.metadata.copy()
-                    metadata["id"] = result.id
-                    metadata["score"] = result.score
-                    doc = Document(
-                        page_content=result.content,
-                        metadata=metadata,
-                    )
-                    filtered.append(doc)
-
-            return filtered
+            return self._filter_and_wrap_results(results)
         except Exception as e:
             logger.error(f"带过滤条件的语义检索失败: {e}")
             return []

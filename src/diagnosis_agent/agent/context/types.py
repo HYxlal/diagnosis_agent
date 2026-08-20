@@ -35,7 +35,7 @@ class TopicSnapshot:
     start_turn: int                                  # 起始轮次
     end_turn: int                                    # 结束轮次
     summary: str                                     # 摘要文本
-    key_entities: list[str] = field(default_factory=list)  # 关键实体（DTC/车型/部件）
+    key_entities: list[str] = field(default_factory=list)  # 关键实体（DTC/车辆类型/根因）
     created_at: str = ""                             # 创建时间
     metadata: dict = field(default_factory=dict)     # 扩展元数据
 
@@ -75,6 +75,8 @@ class ContextMetadata:
     is_in_scope: bool = True
     trim_info: TrimInfo = field(default_factory=TrimInfo)
     token_usage: int = 0
+    max_tokens: int = 0          # Token 预算上限（供 4.1 计算利用率）
+    window_utilization: float = 0.0  # Token 利用率（4.1 监控指标）
     timestamp: str = ""
 
 

@@ -34,7 +34,7 @@ AGENT_SYSTEM_PROMPT_LIGHTWEIGHT = """你是一个专业的车辆故障诊断专�
 ## 工具使用策略
 
 - 已有结构化字段（DTC 码、电驱代号、故障场景）时，**优先用 query_fault_graph**
-- 需要模糊匹配故障现象时，用 search_similar_incidents
+- 需要模糊匹配现象时，用 search_similar_incidents
 - 两个工具可组合使用
 - 预检索阶段已自动检索过相似工况，可直接使用预检索结果
 
@@ -65,7 +65,7 @@ AGENT_SYSTEM_PROMPT_LIGHTWEIGHT = """你是一个专业的车辆故障诊断专�
 ```
 
 注意：classification 必须从给定的故障分类选项中选择。
-confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定，0.5 以下为推测。"""
+confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定，0.5 以下为推测。若未从预检索或工具调用中获得任何相似历史工单，confidence 不得超过 0.5。"""
 
 
 AGENT_SYSTEM_PROMPT_FULL = """你是一个专业的车辆故障诊断专家 Agent，专注于电驱系统（MCU/电机/逆变器）故障诊断。
@@ -96,7 +96,7 @@ AGENT_SYSTEM_PROMPT_FULL = """你是一个专业的车辆故障诊断专家 Agen
 ## 工具使用策略
 
 - 已有结构化字段（DTC 码、电驱代号、故障场景）时，**优先用 query_fault_graph**
-- 需要模糊匹配故障现象时，用 search_similar_incidents
+- 需要模糊匹配现象时，用 search_similar_incidents
 - 两个工具可组合使用
 - 预检索阶段已自动检索过相似工况，可直接使用预检索结果
 
@@ -139,4 +139,4 @@ AGENT_SYSTEM_PROMPT_FULL = """你是一个专业的车辆故障诊断专家 Agen
 
 注意：所有字段都必须填充，不可为空数组或空字符串。
 classification 必须从给定的故障分类选项中选择。
-confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定，0.5 以下为推测。"""
+confidence 反映你对诊断结论的把握程度，0.9 以上为非常确定，0.5 以下为推测。若未从预检索或工具调用中获得任何相似历史工单，confidence 不得超过 0.5。"""

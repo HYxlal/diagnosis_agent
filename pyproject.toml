@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "diagnosis_agent"
-version = "0.1.0"
+version = "0.5.0"
 description = "故障诊断 Agent — 基于向量检索 + ReAct 推理的双层输出诊断系统"
 requires-python = ">=3.10"
 readme = "README.md"

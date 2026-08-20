@@ -3,8 +3,19 @@
 # ============================================
 
 # LLM 配置（阿里云通义千问 Qwen）
+# 模型可用性说明（2026-08-18 实测）：
+#   ❌ qwen3.7-max — 免费额度已耗尽
+#   ❌ qwen-plus — 免费额度已耗尽
+#   ❌ qwen2.5-max/qwen2.5-plus/qwen2.5-turbo — 404 不存在
+#   ❌ qwen3-max — 免费额度已耗尽
+#   ❌ glm5.1 — 不存在
+#   ❌ qwen3.5 — 不存在
+#   ❌ deepseek-v2 — 不存在
+#   ✅ qwen3.5-plus — 主力推荐，聪明且免费额度充足
+#   ✅ qwen3.7-max-preview — 可用，长上下文
+#   ✅ deepseek-v3.1 — 可用
 llm:
-  model: "qwen3.7-max"
+  model: "qwen3.5-plus"
   temperature: 0.3
   max_tokens: 4096
   api_key: "${DASHSCOPE_API_KEY}"
@@ -25,10 +36,10 @@ vector_store:
 
 # 检索配置
 retrieval:
-  strategy: "chroma_only"
+  strategy: "hybrid"
   semantic:
     top_k: 5
-    score_threshold: 0.3
+    score_threshold: 0.6
   # 两段式检索权重融合（预留，待实现）
   hybrid:
     semantic_weight: 0.7
@@ -59,7 +70,7 @@ context:
   # ── 话题检测配置 ──
   topic_detection_enabled: true
   topic_detection_strategy: "embedding+llm"
-  topic_detection_model: ""
+  topic_detection_model: "qwen-turbo"
   topic_similarity_high: 0.6
   topic_similarity_low: 0.27
 
@@ -119,11 +130,44 @@ context:
     url: "redis://localhost:6379/0"
     key_prefix: "session:"
 
+  # ── 自适应窗口配置 ──
+  adaptive_window:
+    enabled: true
+    min_window: 2
+    max_window: 20
+    target_utilization: 0.75
+    adjustment_interval: 10
+
+  # ── 数据保留策略配置 ──
+  retention:
+    retention_days: 30
+    max_archive_size_mb: 500
+    cleanup_interval_hours: 24
+
 # Neo4j 故障知识图谱配置
 neo4j:
   url: "${NEO4J_URI:bolt://localhost:7687}"
   user: "${NEO4J_USER:neo4j}"
-  password: "${NEO4J_PASSWORD:}"
+  password: "${NEO4J_PASSWORD:sDK2aesu}"
   min_candidates: 3
   default_depth: 1
   fallback_to_chroma: true
+
+# 知识沉淀配置
+knowledge:
+  enabled: true
+  persistence_dir: "cache"
+  persistence_file: "conversation_knowledge.json"
+  # 专门用于知识提取的模型，实测 deepseek-v3.1 结构化提取效果最佳
+  extraction_model: "deepseek-v3.1"
+  # 元组解析分隔符配置（不同项目可以自定义，避免输出格式冲突）
+  tuple_delimiter: ":"
+  record_delimiter: ")"
+  completion_delimiter: "返回空列表"
+  # Web 审核页面登录（留空则不启用 Basic Auth）
+  web_username: ""
+  web_password: ""
+
+# 工具调用展示配置
+tool_call:
+  show_details: true

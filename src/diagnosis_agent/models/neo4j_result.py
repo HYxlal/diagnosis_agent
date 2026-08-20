@@ -102,37 +102,39 @@ class FaultCandidate:
         scenario = ""
 
         # 关系类型 → 终点取值字段
-        # HAS_DTC → DTC.code（优先）或 DTC.description
-        # OCCURS_ON → MotorType.code
-        # OCCURS_ON_VEHICLE → VehicleType.type
-        # SHOWS_INDICATOR → Indicator.name
-        # OCCURS_IN_SCENARIO → Scenario 拼成 "category-subcategory-detail"
+        # 关联DTC → DTC.code（优先）或 DTC.description
+        # 出现于 → MotorType.code
+        # 配备 → VehicleType.type（两跳路径：Fault → MotorType → VehicleType）
+        # 亮起 → Indicator.name
+        # 发生于 → Scenario 拼成 "category-subcategory-detail"
         for path_item in record.get("paths") or []:
-            if not isinstance(path_item, list) or len(path_item) != 3:
+            if not isinstance(path_item, list) or len(path_item) < 3:
                 continue
-            target_data = path_item[2]
-            rel_type = path_item[1]
-            if not isinstance(target_data, dict):
-                continue
-            if rel_type == "HAS_DTC":
-                code = target_data.get("code")
-                desc = target_data.get("description")
-                dtc_codes.append(str(code or desc or ""))
-            elif rel_type == "OCCURS_ON":
-                motor_code = str(target_data.get("code") or motor_code)
-            elif rel_type == "OCCURS_ON_VEHICLE":
-                vehicle_type = str(target_data.get("type") or vehicle_type)
-            elif rel_type == "SHOWS_INDICATOR":
-                name = target_data.get("name")
-                if name:
-                    indicators.append(str(name))
-            elif rel_type == "OCCURS_IN_SCENARIO":
-                category = target_data.get("category") or ""
-                subcategory = target_data.get("subcategory") or ""
-                detail = target_data.get("detail") or ""
-                scenario = "-".join(
-                    p for p in [category, subcategory, detail] if p
-                ) or str(category or subcategory or detail)
+            # 路径格式：[n1, rel1, n2, rel2, n3, ...]（3 元素=1跳，5 元素=2跳）
+            for i in range(1, len(path_item) - 1, 2):
+                rel_type = path_item[i]
+                target_data = path_item[i + 1]
+                if not isinstance(target_data, dict):
+                    continue
+                if rel_type == "关联DTC":
+                    code = target_data.get("code")
+                    desc = target_data.get("description")
+                    dtc_codes.append(str(code or desc or ""))
+                elif rel_type == "出现于":
+                    motor_code = str(target_data.get("code") or motor_code)
+                elif rel_type == "配备":
+                    vehicle_type = str(target_data.get("type") or vehicle_type)
+                elif rel_type == "亮起":
+                    name = target_data.get("name")
+                    if name:
+                        indicators.append(str(name))
+                elif rel_type == "发生于":
+                    category = target_data.get("category") or ""
+                    subcategory = target_data.get("subcategory") or ""
+                    detail = target_data.get("detail") or ""
+                    scenario = "-".join(
+                        p for p in [category, subcategory, detail] if p
+                    ) or str(category or subcategory or detail)
 
         return cls(
             fault_id=fault_id,

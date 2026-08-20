@@ -272,10 +272,10 @@ class DiagnosticTools:
                 "description": c.description,
                 "root_cause": c.root_cause,
                 "solution": c.solution,
-                "dtc_code": c.dtc_codes,
+                "dtc_code": ", ".join(c.dtc_codes) if c.dtc_codes else "",
                 "motor_code": c.motor_code,
                 "vehicle_type": c.vehicle_type,
-                "indicators": c.indicators,
+                "dashboard_indicator": ", ".join(c.indicators) if c.indicators else "",
                 "scenario": c.scenario,
                 "source": "neo4j",
             }
@@ -288,7 +288,7 @@ class DiagnosticTools:
         record = document_to_record(doc)
         d = record.to_dict()
         d["record_id"] = doc.metadata.get("id", "")
-        d["similarity"] = round(doc.metadata.get("score", 0.0), 4)
+        d["similarity"] = round(1 - doc.metadata.get("score", 0.0), 4)
         return d
 
     # ------------------------------------------------------------------
@@ -302,7 +302,7 @@ class DiagnosticTools:
         正确绑定实例方法。
 
         工具集：
-        - search_similar_incidents：语义检索（模糊匹配故障现象）
+        - search_similar_incidents：语义检索（模糊匹配现象）
         - query_fault_graph：结构化图查询（精确匹配 DTC/电驱代号/场景等，可扩展图关系）
         - can_converter：CAN 报文文件转 CSV/Excel（结合 DBC 解码）
         - get_incident_detail：工单详情
@@ -324,7 +324,7 @@ class DiagnosticTools:
                     description=(
                         "按结构化字段精确查询故障知识图谱。"
                         "参数：mcuid（MCU标识）、dtc_code（DTC码，多个逗号分隔）、"
-                        "project（项目/车型代号）、component（涉及部件）、"
+                        "project（项目/车辆类型代号）、component（涉及根因/部件）、"
                         "working_condition（工作条件）、software_version（软件版本）、"
                         "depth（关系扩展深度1-2）、top_k（返回数量）。"
                         "适合用确定的结构化字段（如 DTC、MCU标识）做精确召回。"

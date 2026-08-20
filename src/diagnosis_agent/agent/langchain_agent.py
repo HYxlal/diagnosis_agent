@@ -83,6 +83,7 @@ class LangChainDiagnosticAgent:
     def __init__(self, settings: Settings, report_mode: bool = False):
         self.settings = settings
         self._report_mode = report_mode
+        self.show_tool_details = settings.tool_call.show_details
         self._llm = self._init_llm()
         self._retriever = self._init_retriever()
         self._tools = DiagnosticTools(
@@ -239,27 +240,49 @@ class LangChainDiagnosticAgent:
                 parsed_input.bulk_records = convert_result["records"]
             parsed_input.intent = InputIntent.DIAGNOSTIC_QUERY
 
-        # ── 预检索：话题检测通过后，主流程做一轮语义检索 ──
-        # 结果直接注入 prompt，Agent 可看到相似工况，无需自己调工具
+        # ── 预检索：话题检测通过后，主流程做一轮语义检索 + Neo4j 结构化召回 ──
         similar_cases: list = []
         has_similar = False
-        score_threshold = self.settings.retrieval.semantic.score_threshold
 
         try:
             query = parsed_input.search_query or description
-            docs = self._retriever.semantic_search(query=query, top_k=5)
-            # score 已归一化到 [0,1]，越高越相似
-            similar_cases = [d for d in docs if d.metadata.get("score", 0) >= score_threshold]
+            # 语义检索（Chroma）
+            similar_cases = self._retriever.semantic_search(query=query, top_k=5)
+            # Neo4j 结构化召回
+            try:
+                neo4j_keywords = query
+                if parsed_input.mcuid:
+                    neo4j_keywords = f"{neo4j_keywords} {parsed_input.mcuid}"
+                neo4j_candidates = self._retriever.neo4j.structured_recall(
+                    keyword=neo4j_keywords, limit=5, depth=2
+                )
+                neo4j_docs = [c.to_document() for c in neo4j_candidates]
+                # 合并去重（按 record_id）
+                seen_ids = set()
+                for d in similar_cases:
+                    rid = d.metadata.get("id", "")
+                    if rid:
+                        seen_ids.add(rid)
+                for d in neo4j_docs:
+                    rid = d.metadata.get("id", "")
+                    if rid and rid not in seen_ids:
+                        seen_ids.add(rid)
+                        similar_cases.append(d)
+                if neo4j_candidates:
+                    logger.info(f"预检索: Neo4j 补充 {len(neo4j_candidates)} 条")
+            except Exception as e:
+                logger.warning(f"预检索 Neo4j 召回失败: {e}")
+
             has_similar = len(similar_cases) > 0
             if has_similar:
                 logger.info(
-                    f"预检索: 找到 {len(similar_cases)} 条相似工况 "
-                    f"(阈值 {score_threshold})"
+                    f"预检索: 共 {len(similar_cases)} 条相似工况"
                 )
+                # 终端打印预检索工单
+                self._print_pre_retrieval_cases(similar_cases)
             else:
                 logger.info(
-                    f"预检索: 未找到相似工况 "
-                    f"({len(docs)} 条均低于阈值 {score_threshold})"
+                    f"预检索: 未找到相似工况"
                 )
         except Exception as e:
             logger.warning(f"预检索失败，Agent 将自主检索: {e}")
@@ -274,9 +297,33 @@ class LangChainDiagnosticAgent:
 
         findings = self._build_findings(reasoning_result, similar_cases)
 
-        # 将工具调用中检索到的 Document 转为 SimilarCase 模型
-        # 优先从 tool_calls 中提取 search/query_fault_graph 的结果
-        similar_case_models = self._extract_similar_cases_from_tools(tool_calls)
+        # 将预检索 Document 转为 SimilarCase 模型
+        pre_retrieval_cases = [
+            SimilarCase(
+                record_id=doc.metadata.get("id", ""),
+                problem_description=doc.page_content[:200],
+                similarity=1 - doc.metadata.get("score", 0.0),
+                fault_scenario=doc.metadata.get("description", doc.page_content[:100]),
+                root_cause=doc.metadata.get("fault_root_cause", ""),
+                countermeasure=doc.metadata.get("countermeasure", ""),
+                dashboard_indicator=doc.metadata.get("dashboard_indicator", ""),
+                dtc_code=doc.metadata.get("dtc_code", ""),
+            )
+            for doc in similar_cases
+        ]
+        seen_ids = set()
+        # 优先从预检索结果填充
+        similar_case_models = []
+        for c in pre_retrieval_cases:
+            if c.record_id and c.record_id not in seen_ids:
+                similar_case_models.append(c)
+                seen_ids.add(c.record_id)
+        # 工具调用中的结果补充（去重）
+        for c in self._extract_similar_cases_from_tools(tool_calls):
+            if not c.record_id or c.record_id not in seen_ids:
+                similar_case_models.append(c)
+                if c.record_id:
+                    seen_ids.add(c.record_id)
 
         tools_used = list(set(tc.tool_name for tc in tool_calls))
 
@@ -572,20 +619,41 @@ class LangChainDiagnosticAgent:
         def _on_new_message(msg):
             """收到新消息时打印格式化输出"""
             if isinstance(msg, AIMessage) and msg.tool_calls:
+                thought = _format_content(msg.content)
+                if thought:
+                    console.print(f"\n[bold blue]── Agent 思考 ──[/bold blue]")
+                    console.print(thought)
                 for i, tc in enumerate(msg.tool_calls, 1):
                     tool_name = tc.get("name", "")
                     args = tc.get("args", {})
-                    console.print(f"\n[bold yellow]── 调用工具 #{i}: {tool_name} ──[/bold yellow]")
-                    if args:
-                        console.print(Syntax(json.dumps(args, ensure_ascii=False, indent=2), "json", theme="default"))
+                    if getattr(self, 'show_tool_details', True):
+                        console.print(f"\n[bold yellow]── 调用工具 #{i}: {tool_name} ──[/bold yellow]")
+                        if args:
+                            console.print(Syntax(json.dumps(args, ensure_ascii=False, indent=2), "json", theme="monokai"))
+                    else:
+                        console.print(f"\n[bold yellow]── 调用工具 #{i}: {tool_name}[/bold yellow]")
             elif isinstance(msg, ToolMessage):
                 content = _format_content(msg.content)
-                console.print(f"\n[bold green]── 工具返回 ──[/bold green]")
-                try:
-                    obj = json.loads(content) if isinstance(content, str) else content
-                    console.print(Syntax(json.dumps(obj, ensure_ascii=False, indent=2), "json", theme="default"))
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    console.print(content[:3000])
+                tool_name = getattr(msg, 'name', '')
+                result_count = 0
+                if content:
+                    try:
+                        obj = json.loads(content) if isinstance(content, str) else content
+                        if isinstance(obj, list):
+                            result_count = len(obj)
+                        elif isinstance(obj, dict):
+                            result_count = len(obj)
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        pass
+                if getattr(self, 'show_tool_details', True):
+                    console.print(f"\n[bold green]── 工具返回 ──[/bold green]")
+                    try:
+                        obj = json.loads(content) if isinstance(content, str) else content
+                        console.print(Syntax(json.dumps(obj, ensure_ascii=False, indent=2), "json", theme="monokai"))
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        console.print(content[:3000])
+                else:
+                    console.print(f"  [dim]（返回 {result_count} 条结果）[/dim]")
             elif isinstance(msg, AIMessage) and not msg.tool_calls:
                 content = _format_content(msg.content)
                 if content:
@@ -593,6 +661,31 @@ class LangChainDiagnosticAgent:
                     console.print(content)
 
         self._stream_callback = _on_new_message
+
+    def _print_pre_retrieval_cases(self, similar_cases: list) -> None:
+        """在终端打印预检索到的相似工单"""
+        if not similar_cases:
+            return
+        from rich.console import Console
+        from rich.table import Table
+        console = Console()
+        table = Table(title=f"\n预检索相似工单 ({len(similar_cases)} 条)", show_header=True)
+        table.add_column("#", style="dim", width=3)
+        table.add_column("ID", style="cyan", width=24)
+        table.add_column("相似度", style="green", width=8)
+        table.add_column("问题描述", style="white", width=50)
+        table.add_column("根因", style="yellow", width=30)
+        for i, doc in enumerate(similar_cases, 1):
+            meta = doc.metadata
+            similarity = 1 - meta.get("score", 0)
+            table.add_row(
+                str(i),
+                meta.get("id", "N/A"),
+                f"{similarity:.2f}",
+                str(meta.get("problem_description", doc.page_content[:50]))[:50],
+                str(meta.get("root_cause", meta.get("fault_root_cause", "")))[:30],
+            )
+        console.print(table)
 
     def _parse_final_result(self, last_message) -> dict:
         """解析最终结果，使用 PydanticOutputParser 验证"""

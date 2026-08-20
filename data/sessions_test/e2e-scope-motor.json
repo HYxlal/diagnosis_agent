@@ -1,0 +1,20 @@
+{
+  "session_id": "e2e-scope-motor",
+  "hot_messages": [],
+  "warm_summaries": [],
+  "archived_topic_count": 0,
+  "current_topic": {
+    "topic_id": "e2e-scope-motor-0",
+    "topic_label": "话题-1",
+    "start_turn": 0,
+    "end_turn": 0,
+    "summary": "",
+    "key_entities": [],
+    "created_at": "2026-08-13T08:55:22.275204+00:00",
+    "metadata": {}
+  },
+  "total_turns": 0,
+  "created_at": "2026-08-13T08:55:19.610385+00:00",
+  "last_activity_at": "2026-08-13T08:55:19.610385+00:00",
+  "metadata": {}
+}

@@ -11,10 +11,9 @@
 
 当前阶段：
 - 外部字段已对齐 StandardInput.entities：dtc_code, project, component, working_condition, software_version。
-- 由于 Neo4j schema 尚未按新字段重构，本层仍按旧 schema 查询：
-  mcuid → motor_codes，dtc_code → dtc_inputs，其余字段统一作为 keyword。
-- 等 Neo4j schema 重构后，再把 project/component/working_condition/software_version
-  映射到对应节点属性。
+- Neo4j schema 已重构为中文语义关系（出现于/关联DTC/亮起/发生于/配备 等）。
+- 当前映射：mcuid → motor_codes，dtc_code → dtc_inputs，其余字段统一作为 keyword。
+- 待优化：project/component/working_condition/software_version 映射到对应节点属性。
 
 不在这里做的事：
 - 不做 embedding 精排（在 reranker.py）

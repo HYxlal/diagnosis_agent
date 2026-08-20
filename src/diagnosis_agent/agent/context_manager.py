@@ -33,6 +33,9 @@ from .context.types import (
     ConversationContext,
     TopicSnapshot,
 )
+from .context.metrics import metrics
+from .context.adaptive_window import AdaptiveWindowManager
+from .context.audit import audit as _audit
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +176,7 @@ class SimpleContextManager:
         topic_detector=None,
         async_mode: bool = False,
         emergency_min_turns: int = 2,
+        adaptive_window_manager: AdaptiveWindowManager | None = None,
     ):
         self.window_size = window_size
         self.max_tokens = max_tokens
@@ -180,6 +184,7 @@ class SimpleContextManager:
         self.topic_detector = topic_detector
         self.async_mode = async_mode
         self.emergency_min_turns = emergency_min_turns
+        self.adaptive_window_manager = adaptive_window_manager
 
     def prepare(self, messages: list) -> PrepareResult:
         """裁剪消息到预算内，返回 PrepareResult
@@ -206,14 +211,20 @@ class SimpleContextManager:
                 ),
             )
 
-        # 1. 按 window_size 截断
+        # 使用自适应窗口（如果启用）
+        effective_window = self.window_size
+        if self.adaptive_window_manager:
+            effective_window = self.adaptive_window_manager.get_current_window()
+
+        # 1. 按 effective_window 截断
         before_window = len(messages)
-        messages = self._truncate_by_window(messages)
+        messages = self._truncate_by_window(messages, effective_window)
         if len(messages) < before_window:
             trim_info.step = "trim"
             trim_info.trimmed_turns = self._count_rounds_dropped(
                 messages, before_window - len(messages)
             )
+            _audit.log_trim("", "window", before_window, len(messages))
 
         # 2. 按 token 预算截断
         before_tokens = len(messages)
@@ -225,6 +236,7 @@ class SimpleContextManager:
                 messages, before_tokens - len(messages)
             )
             trim_info.trimmed_turns += extra_dropped
+            _audit.log_trim("", "token", before_tokens, len(messages))
 
         # 计算实际 token 用量
         token_usage = self._count_tokens(messages)
@@ -238,7 +250,7 @@ class SimpleContextManager:
 
         total_turns = len(_find_round_boundaries(messages))
 
-        return PrepareResult(
+        result = PrepareResult(
             messages=messages,
             metadata=self._build_metadata(
                 session_id="",
@@ -247,6 +259,17 @@ class SimpleContextManager:
                 turn_count=total_turns,
             ),
         )
+
+        # 记录自适应窗口利用率
+        if self.adaptive_window_manager:
+            utilization = token_usage / max(1, self.max_tokens)
+            self.adaptive_window_manager.record_utilization(utilization)
+            if self.adaptive_window_manager.should_adjust():
+                self.adaptive_window_manager.adjust()
+
+        metrics.update_from_prepare(result.metadata)
+        metrics.current_window_size.set(effective_window)
+        return result
 
     def prepare_from_context(
         self, ctx: ConversationContext, query: str
@@ -283,15 +306,19 @@ class SimpleContextManager:
             if decision.decision == "different":
                 topic_changed = True
                 logger.info(f"话题切换: {decision.new_topic_label}")
+                metrics.record_topic_switch()
+                _audit.log_topic_switch(
+                    ctx.session_id,
+                    old_topic=ctx.current_topic.topic_label if ctx.current_topic else "无",
+                    new_topic=decision.new_topic_label or "未知",
+                )
                 # 步骤1: 生成旧话题摘要
                 if self.summarizer and ctx.current_topic:
                     self._summarize_current_topic(ctx)
                 # 步骤2: 归档旧话题（完整消息快照存入冷层）
                 if ctx.hot_messages:
                     self._archive_topic_snapshot(ctx)
-                # 步骤3: 清空热层
-                ctx.hot_messages = []
-                # 步骤4: 创建新话题
+                # 步骤3: 创建新话题（热层消息由调用方在 sm.archive() 后清空，确保归档完整）
                 from .context.types import TopicSnapshot
                 ctx.current_topic = TopicSnapshot(
                     topic_id=ctx.session_id + "-" + str(ctx.total_turns),
@@ -305,12 +332,17 @@ class SimpleContextManager:
                 # 步骤5: 旧摘要已存入 warm_summaries，后续构建消息时注入 SystemMessage
 
         # ── 三步降级（两层触发：window_size + token 预算） ──
-        # 步骤1: 热层超 window_size → 溢出消息生成摘要，追加到温层
+        # 使用自适应窗口（如果启用）
+        effective_window = self.window_size
+        if self.adaptive_window_manager:
+            effective_window = self.adaptive_window_manager.get_current_window()
+
+        # 步骤1: 热层超 effective_window → 溢出消息生成摘要，追加到温层
         hot_rounds = self._count_hot_rounds(ctx)
-        if hot_rounds > self.window_size:
+        if hot_rounds > effective_window:
             # 先移除溢出消息（同步，毫秒级）
             boundaries = self._find_hot_round_boundaries(ctx)
-            keep_from = boundaries[-self.window_size]
+            keep_from = boundaries[-effective_window]
             overflow = ctx.hot_messages[:keep_from]
             ctx.hot_messages = ctx.hot_messages[keep_from:]
 
@@ -319,7 +351,7 @@ class SimpleContextManager:
                     # 异步模式：只标记需要摘要，不阻塞
                     trim_info.needs_summary = True
                     trim_info.summarized_start = 0
-                    trim_info.summarized_turns = hot_rounds - self.window_size
+                    trim_info.summarized_turns = hot_rounds - effective_window
                     trim_info.step = "summarize"
                 elif self.summarizer:
                     # 同步模式：有摘要器则立即生成摘要
@@ -397,13 +429,15 @@ class SimpleContextManager:
         if ctx.current_topic:
             result.metadata.current_topic = ctx.current_topic.topic_label
 
+        metrics.update_from_prepare(result.metadata)
+        metrics.current_window_size.set(effective_window)
         return result
 
     # ------------------------------------------------------------------
     # 三步降级
     # ------------------------------------------------------------------
 
-    def _step1_hot_to_warm(self, ctx: ConversationContext) -> None:
+    def _step1_hot_to_warm(self, ctx: ConversationContext, window_size: int | None = None) -> None:
         """步骤1: 热层→温层（追加摘要）
 
         将超出 window_size 的最早轮次消息移出热层，
@@ -412,11 +446,12 @@ class SimpleContextManager:
         每次热层溢出只追加一个新摘要，不合并旧摘要。
         温层摘要数量会逐步增长，直到步骤2按 token 预算合并。
         """
+        ws = window_size if window_size is not None else self.window_size
         boundaries = self._find_hot_round_boundaries(ctx)
-        if len(boundaries) <= self.window_size:
+        if len(boundaries) <= ws:
             return
 
-        keep_from = boundaries[-self.window_size]
+        keep_from = boundaries[-ws]
         overflow = ctx.hot_messages[:keep_from]
 
         if not overflow:
@@ -436,6 +471,13 @@ class SimpleContextManager:
                 end_turn=ctx.total_turns,
             )
             ctx.warm_summaries.append(new_snapshot)
+            _audit.log_summarize(
+                ctx.session_id,
+                new_snapshot.topic_label,
+                len(overflow),
+                len(new_snapshot.summary),
+                turns=new_snapshot.end_turn - new_snapshot.start_turn,
+            )
 
         # 从热层移除
         ctx.hot_messages = ctx.hot_messages[keep_from:]
@@ -588,17 +630,18 @@ class SimpleContextManager:
                 boundaries.append(i)
         return boundaries
 
-    def _truncate_by_window(self, messages: list) -> list:
+    def _truncate_by_window(self, messages: list, window_size: int | None = None) -> list:
         """按 window_size 保留最近 N 轮"""
+        ws = window_size if window_size is not None else self.window_size
         boundaries = _find_round_boundaries(messages)
-        if len(boundaries) <= self.window_size:
+        if len(boundaries) <= ws:
             return messages
 
-        keep_from = boundaries[-self.window_size]
-        dropped = len(boundaries) - self.window_size
+        keep_from = boundaries[-ws]
+        dropped = len(boundaries) - ws
         logger.warning(
             f"上下文窗口裁剪: 丢弃 {dropped} 轮历史 "
-            f"(window_size={self.window_size})"
+            f"(window_size={ws})"
         )
         return messages[keep_from:]
 
@@ -647,6 +690,7 @@ class SimpleContextManager:
         turn_count: int,
     ) -> ContextMetadata:
         """构建上下文元数据"""
+        token_usage = self._count_tokens(messages)
         return ContextMetadata(
             session_id=session_id,
             total_turns=turn_count,
@@ -656,7 +700,9 @@ class SimpleContextManager:
             current_topic=None,
             topic_changed=False,
             trim_info=trim_info,
-            token_usage=self._count_tokens(messages),
+            token_usage=token_usage,
+            max_tokens=self.max_tokens,
+            window_utilization=token_usage / max(1, self.max_tokens),
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
 

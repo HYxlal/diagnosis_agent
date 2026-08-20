@@ -1,0 +1,28 @@
+{
+  "pending_reviews": [],
+  "processed_knowledge": {
+    "100e670e-50be-4db3-ac22-7cc9493bdf93": {
+      "knowledge_id": "100e670e-50be-4db3-ac22-7cc9493bdf93",
+      "conversation_id": "test_conv_001",
+      "extracted_entities": [],
+      "extracted_relationships": [],
+      "conversation_context": "用户: 我的车辆MCU报P0201故障码，车辆在低速爬坡的时候出现扭矩波动，电机温度超过120度之后报过温保护\n助手: 根据故障现象分析，根因为旋变零点偏移导致的力矩估算不准，对策是重新标定旋变零点，同时检查散热风扇是否运行正常。适用于MCU-234型号电驱系统。",
+      "status": "approved",
+      "reviewer": "test_system",
+      "review_time": "2026-08-20T10:16:26.570734",
+      "review_comment": "测试自动通过",
+      "created_at": "2026-08-20T10:16:26.569779"
+    }
+  },
+  "stats": {
+    "extractions": 1,
+    "entities_extracted": 0,
+    "relationships_extracted": 0,
+    "submitted_for_review": 1,
+    "approved_knowledge": 1,
+    "rejected_knowledge": 0,
+    "errors": 0,
+    "merged_entities": 0
+  },
+  "saved_at": "2026-08-20T10:16:26.570891"
+}

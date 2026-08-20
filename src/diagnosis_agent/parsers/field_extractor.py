@@ -50,7 +50,7 @@ class FieldExtractor:
 任务：从用户输入中提取以下字段并输出 JSON：
 
 必须提取的字段（即使只是重复用户输入）：
-- problem_description: 用户描述的故障现象
+- problem_description: 用户描述的现象
 
 可选字段（只提取明确提到的）：
 - root_cause: 根本原因（如果用户提到或能明确推断）

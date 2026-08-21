@@ -20,13 +20,15 @@ from typing import Optional
 def build_similar_case_prompt(
     description: str,
     similar_cases_text: str,
+    search_query: str = "",
 ) -> str:
     """构建有相似工况时的 user prompt"""
+    query_line = f"\n（检索词: \"{search_query}\"）" if search_query else ""
     return f"""## 当前故障描述
 
 {description}
 
-## 预检索结果
+## 预检索结果{query_line}
 
 {similar_cases_text}
 

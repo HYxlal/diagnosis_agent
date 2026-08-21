@@ -65,7 +65,7 @@ class TrimInfo:
 class ContextMetadata:
     """prepare() 返回的元数据 — 描述当前会话状态"""
 
-    session_id: str = ""
+    conversation_id: str = ""
     total_turns: int = 0
     hot_message_count: int = 0
     warm_summary_count: int = 0
@@ -114,7 +114,7 @@ class ConversationContext:
     状态机：created → active → idle → closing → archived（+ error）
     """
 
-    session_id: str = ""
+    conversation_id: str = ""
     # 会话状态（状态机）
     status: str = "created"  # created | active | idle | closing | archived | error
     # 热层：最近 N 轮完整消息
@@ -136,7 +136,7 @@ class ConversationContext:
     def to_dict(self) -> dict:
         """序列化为 dict（用于 JSON 持久化）"""
         return {
-            "session_id": self.session_id,
+            "conversation_id": self.conversation_id,
             "status": self.status,
             "hot_messages": self.hot_messages,
             "warm_summaries": [
@@ -176,7 +176,7 @@ class ConversationContext:
     def from_dict(cls, data: dict) -> "ConversationContext":
         """从 dict 反序列化"""
         ctx = cls(
-            session_id=data.get("session_id", ""),
+            conversation_id=data.get("conversation_id", ""),
             status=data.get("status", "active"),  # 兼容旧数据：无 status 字段时默认为 active
             hot_messages=data.get("hot_messages", []),
             archived_topic_count=data.get("archived_topic_count", 0),
@@ -213,11 +213,11 @@ class ConversationContext:
         return ctx
 
     @classmethod
-    def create_new(cls, session_id: str) -> "ConversationContext":
+    def create_new(cls, conversation_id: str) -> "ConversationContext":
         """创建新会话"""
         now = datetime.now(timezone.utc).isoformat()
         return cls(
-            session_id=session_id,
+            conversation_id=conversation_id,
             created_at=now,
             last_activity_at=now,
         )
@@ -238,10 +238,10 @@ class ArchivedSession:
 
     会话关闭或话题切换时，将 ConversationContext 完整归档。
     同时保存温层摘要和热层消息，支持恢复后显示历史对话。
-    归档文件存储在 data/sessions/archive/{session_id}.json。
+    归档文件存储在 data/sessions/archive/{conversation_id}.json。
     """
 
-    session_id: str
+    conversation_id: str
     total_turns: int
     topics: list[TopicSnapshot] = field(default_factory=list)
     hot_messages: list[dict] = field(default_factory=list)  # 完整热层消息
@@ -252,7 +252,7 @@ class ArchivedSession:
 
     def to_dict(self) -> dict:
         return {
-            "session_id": self.session_id,
+            "conversation_id": self.conversation_id,
             "total_turns": self.total_turns,
             "topics": [
                 {

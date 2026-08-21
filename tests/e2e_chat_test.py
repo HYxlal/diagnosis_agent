@@ -45,9 +45,9 @@ async def main():
     reset_settings()
     settings = get_settings()
     persist_dir = "data/sessions"
-    session_id = f"e2e-llm-{datetime.now().strftime('%H%M%S')}"
+    conversation_id = f"e2e-llm-{datetime.now().strftime('%H%M%S')}"
 
-    print_section(f"端到端 LLM 实测 — 会话: {session_id} (window_size=2)")
+    print_section(f"端到端 LLM 实测 — 会话: {conversation_id} (window_size=2)")
 
     # ── 初始化组件 ──
     sm = SessionManager(persist_dir=persist_dir)
@@ -102,14 +102,14 @@ async def main():
         print(f"  用户: {query}")
 
         # 构建上下文
-        ctx = sm.get_conversation_context(session_id)
+        ctx = sm.get_conversation_context(conversation_id)
         prepared = await context_manager.prepare_messages_async(ctx, query)
 
         # 构建标准输入
         standard_input = StandardInput(
             raw_query=query,
             mcuid="MCU_002",
-            session_id=session_id,
+            conversation_id=conversation_id,
             entities=StandardEntities(),
         )
 
@@ -136,21 +136,21 @@ async def main():
             from langchain_core.messages import messages_to_dict
             current_msgs = messages_to_dict(getattr(agent, "_last_messages", []))
             if current_msgs:
-                sm.update(session_id, query, current_msgs)
+                sm.update(conversation_id, query, current_msgs)
         else:
             print(f"  ❌ code={result.code}, msg={result.msg}")
 
     print_result(total_ok == 5, f"5 轮完成: {total_ok}/5 成功")
 
     # 验证会话状态
-    ctx = sm.get_conversation_context(session_id)
+    ctx = sm.get_conversation_context(conversation_id)
     if ctx:
         print_result(ctx.total_turns == 5, f"会话轮次: {ctx.total_turns}", f"status={ctx.status}")
         print_result(len(ctx.hot_messages) > 0, f"热层消息数: {len(ctx.hot_messages)}")
 
     # 等待异步摘要完成（window_size=2，5 轮会触发多次摘要）
     await asyncio.sleep(5.0)
-    ctx = sm.get_conversation_context(session_id)
+    ctx = sm.get_conversation_context(conversation_id)
     if ctx:
         print_result(
             len(ctx.warm_summaries) > 0,
@@ -164,14 +164,14 @@ async def main():
     # ──────────────────────────────────────────────
     print_section("阶段 2: 归档 + 冷层恢复")
 
-    archived = sm.archive(session_id)
+    archived = sm.archive(conversation_id)
     print_result(archived is not None, f"归档成功: {archived.total_turns if archived else 'N/A'} 轮")
 
-    archive_file = Path(persist_dir) / "archive" / f"{session_id}.json"
+    archive_file = Path(persist_dir) / "archive" / f"{conversation_id}.json"
     print_result(archive_file.exists(), f"冷层文件存在: {archive_file}")
 
     # 恢复
-    restored = sm.restore_from_archive(session_id)
+    restored = sm.restore_from_archive(conversation_id)
     print_result(restored is not None, f"恢复成功")
     if restored:
         print_result(restored.total_turns == 5, f"恢复后轮次: {restored.total_turns}")
@@ -186,14 +186,14 @@ async def main():
     # ──────────────────────────────────────────────
     print_section("阶段 3: 恢复后继续对话")
 
-    sm._sessions[session_id] = restored  # 手动放回内存
-    ctx = sm.get_conversation_context(session_id)
+    sm._sessions[conversation_id] = restored  # 手动放回内存
+    ctx = sm.get_conversation_context(conversation_id)
     prepared = await context_manager.prepare_messages_async(ctx, "回顾一下之前的诊断结论")
 
     standard_input = StandardInput(
         raw_query="回顾一下之前的诊断结论",
         mcuid="MCU_002",
-        session_id=session_id,
+        conversation_id=conversation_id,
         entities=StandardEntities(),
     )
 
@@ -206,8 +206,8 @@ async def main():
             from langchain_core.messages import messages_to_dict
             current_msgs = messages_to_dict(getattr(agent, "_last_messages", []))
             if current_msgs:
-                sm.update(session_id, "回顾一下之前的诊断结论", current_msgs)
-            ctx = sm.get_conversation_context(session_id)
+                sm.update(conversation_id, "回顾一下之前的诊断结论", current_msgs)
+            ctx = sm.get_conversation_context(conversation_id)
             print_result(ctx.total_turns == 6, f"恢复后继续对话: 轮次 {ctx.total_turns} (应为 6)")
         else:
             print_result(False, f"诊断失败: code={result.code}")
@@ -220,16 +220,16 @@ async def main():
     print_section("阶段 4: 空闲超时自动归档")
 
     sm._idle_timeout = 10  # 缩到 10 秒
-    ctx = sm.get_conversation_context(session_id)
+    ctx = sm.get_conversation_context(conversation_id)
     if ctx:
         ctx.last_activity_at = (datetime.now(timezone.utc) - timedelta(seconds=15)).isoformat()
-        sm._sessions[session_id] = ctx
+        sm._sessions[conversation_id] = ctx
 
     # 再次访问应触发归档
-    ctx_reloaded = sm._load_to_memory(session_id)
+    ctx_reloaded = sm._load_to_memory(conversation_id)
     print_result(ctx_reloaded.status == "created", f"空闲超时触发归档: status={ctx_reloaded.status}")
 
-    archive_file = Path(persist_dir) / "archive" / f"{session_id}.json"
+    archive_file = Path(persist_dir) / "archive" / f"{conversation_id}.json"
     print_result(archive_file.exists(), "冷层文件存在（空闲超时归档）")
 
     # ──────────────────────────────────────────────
@@ -239,11 +239,11 @@ async def main():
 
     # 创建独立的 context_manager，window_size=1 确保次次触发摘要
     acm_fast = _make_context_manager(window_size=1)
-    session_id2 = f"e2e-llm-async-{datetime.now().strftime('%H%M%S')}"
+    conversation_id2 = f"e2e-llm-async-{datetime.now().strftime('%H%M%S')}"
     response_times = []
 
     for i in range(3):
-        ctx = sm.get_conversation_context(session_id2)
+        ctx = sm.get_conversation_context(conversation_id2)
         print(f"  [debug] 第{i+1}轮: hot_rounds={acm_fast._count_hot_rounds(ctx)}, hot_messages={len(ctx.hot_messages)}")
         prepared = await acm_fast.prepare_messages_async(ctx, f"电机故障诊断问题_{i}")
         print(f"  [debug] needs_summary={prepared.metadata.trim_info.needs_summary}, overflow_cache={list(acm_fast._overflow_cache.keys())}")
@@ -251,7 +251,7 @@ async def main():
         standard_input = StandardInput(
             raw_query=f"电机故障诊断问题_{i}",
             mcuid="MCU_003",
-            session_id=session_id2,
+            conversation_id=conversation_id2,
             entities=StandardEntities(),
         )
 
@@ -269,7 +269,7 @@ async def main():
             current_msgs = messages_to_dict(last_msgs) if last_msgs else []
             print(f"  [debug] _last_messages len={len(last_msgs) if last_msgs else 0}, current_msgs len={len(current_msgs)}")
             if current_msgs:
-                sm.update(session_id2, f"电机故障诊断问题_{i}", current_msgs)
+                sm.update(conversation_id2, f"电机故障诊断问题_{i}", current_msgs)
             print(f"  第{i+1}轮: {elapsed:.1f}s (LLM 耗时)")
         else:
             print(f"  第{i+1}轮: ❌ code={result.code}")
@@ -281,7 +281,7 @@ async def main():
 
     # 等待后台摘要完成
     await asyncio.sleep(5.0)
-    ctx = sm.get_conversation_context(session_id2)
+    ctx = sm.get_conversation_context(conversation_id2)
     if ctx:
         print_result(
             len(ctx.warm_summaries) > 0,
@@ -295,11 +295,11 @@ async def main():
 
     # ── 总结 ──
     print_section("测试总结")
-    print(f"  会话 ID: {session_id}")
-    print(f"  冷层文件: {Path(persist_dir) / 'archive' / f'{session_id}.json'}")
-    print(f"  会话 ID (异步): {session_id2}")
-    print(f"  冷层文件: {Path(persist_dir) / 'archive' / f'{session_id2}.json'}")
-    print(f"\n  查看归档: python -m diagnosis_agent.cli session show {session_id}")
+    print(f"  会话 ID: {conversation_id}")
+    print(f"  冷层文件: {Path(persist_dir) / 'archive' / f'{conversation_id}.json'}")
+    print(f"  会话 ID (异步): {conversation_id2}")
+    print(f"  冷层文件: {Path(persist_dir) / 'archive' / f'{conversation_id2}.json'}")
+    print(f"\n  查看归档: python -m diagnosis_agent.cli session show {conversation_id}")
     print(f"  会话列表: python -m diagnosis_agent.cli session list")
 
 

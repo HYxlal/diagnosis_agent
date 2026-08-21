@@ -36,3 +36,7 @@ build_patch_v031.py
 deploy_v030_to_v031.zip
 README_DEPLOY.txt
 data/sessions/
+data/sessions_test/
+data/can_downloads/
+*.png
+新建文本.txt

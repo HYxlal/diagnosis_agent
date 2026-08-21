@@ -178,7 +178,7 @@ class TestIdleTimeout:
 
         with open(archive_path) as f:
             archived_data = json.load(f)
-        assert archived_data["session_id"] == "test-ac11"
+        assert archived_data["conversation_id"] == "test-ac11"
         assert archived_data["total_turns"] == 3
 
     def test_active_session_not_archived(self, tmp_path):
@@ -220,7 +220,7 @@ class TestIdleTimeout:
         with open(archive_path) as f:
             data = json.load(f)
 
-        assert data["session_id"] == "test-ac11-data"
+        assert data["conversation_id"] == "test-ac11-data"
         assert data["total_turns"] == 7
 
 

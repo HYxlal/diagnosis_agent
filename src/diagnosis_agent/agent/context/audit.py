@@ -8,7 +8,7 @@
 - archive: 会话归档
 - topic_switch: 话题切换
 
-写入格式：结构化 JSON，每行一条记录，文件路径 data/sessions/audit/{session_id}.jsonl
+写入格式：结构化 JSON，每行一条记录，文件路径 data/sessions/audit/{conversation_id}.jsonl
 """
 
 from __future__ import annotations
@@ -48,11 +48,11 @@ class AuditLogger:
     def _ensure_dir(self) -> None:
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
-    def _write_event(self, session_id: str, event: dict) -> None:
+    def _write_event(self, conversation_id: str, event: dict) -> None:
         """写入一条审计事件"""
         try:
             self._ensure_dir()
-            path = self._base_dir / f"{session_id}.jsonl"
+            path = self._base_dir / f"{conversation_id}.jsonl"
             event["_timestamp"] = datetime.now(timezone.utc).isoformat()
             with self._lock:
                 with open(path, "a", encoding="utf-8") as f:
@@ -62,31 +62,31 @@ class AuditLogger:
 
     # ── 事件记录方法 ──
 
-    def log_session_create(self, session_id: str) -> None:
-        self._write_event(session_id, {
+    def log_session_create(self, conversation_id: str) -> None:
+        self._write_event(conversation_id, {
             "event": "session_create",
-            "session_id": session_id,
+            "conversation_id": conversation_id,
         })
 
-    def log_session_end(self, session_id: str, reason: str) -> None:
-        self._write_event(session_id, {
+    def log_session_end(self, conversation_id: str, reason: str) -> None:
+        self._write_event(conversation_id, {
             "event": "session_end",
-            "session_id": session_id,
+            "conversation_id": conversation_id,
             "reason": reason,
         })
 
     def log_trim(
         self,
-        session_id: str,
+        conversation_id: str,
         step: str,
         before_count: int,
         after_count: int,
         token_usage: int = 0,
         max_tokens: int = 0,
     ) -> None:
-        self._write_event(session_id, {
+        self._write_event(conversation_id, {
             "event": "trim",
-            "session_id": session_id,
+            "conversation_id": conversation_id,
             "step": step,
             "before_count": before_count,
             "after_count": after_count,
@@ -97,15 +97,15 @@ class AuditLogger:
 
     def log_summarize(
         self,
-        session_id: str,
+        conversation_id: str,
         topic_label: str,
         message_count: int,
         summary_length: int,
         turns: int = 0,
     ) -> None:
-        self._write_event(session_id, {
+        self._write_event(conversation_id, {
             "event": "summarize",
-            "session_id": session_id,
+            "conversation_id": conversation_id,
             "topic_label": topic_label,
             "message_count": message_count,
             "summary_length": summary_length,
@@ -114,33 +114,33 @@ class AuditLogger:
 
     def log_archive(
         self,
-        session_id: str,
+        conversation_id: str,
         total_turns: int,
         duration: int,
     ) -> None:
-        self._write_event(session_id, {
+        self._write_event(conversation_id, {
             "event": "archive",
-            "session_id": session_id,
+            "conversation_id": conversation_id,
             "total_turns": total_turns,
             "duration": duration,
         })
 
     def log_topic_switch(
         self,
-        session_id: str,
+        conversation_id: str,
         old_topic: str,
         new_topic: str,
     ) -> None:
-        self._write_event(session_id, {
+        self._write_event(conversation_id, {
             "event": "topic_switch",
-            "session_id": session_id,
+            "conversation_id": conversation_id,
             "old_topic": old_topic,
             "new_topic": new_topic,
         })
 
-    def read_logs(self, session_id: str) -> list[dict]:
+    def read_logs(self, conversation_id: str) -> list[dict]:
         """读取指定会话的审计日志"""
-        path = self._base_dir / f"{session_id}.jsonl"
+        path = self._base_dir / f"{conversation_id}.jsonl"
         if not path.exists():
             return []
         events = []

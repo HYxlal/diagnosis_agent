@@ -204,7 +204,7 @@ class SimpleContextManager:
             return PrepareResult(
                 messages=[],
                 metadata=self._build_metadata(
-                    session_id="",
+                    conversation_id="",
                     messages=[],
                     trim_info=trim_info,
                     turn_count=0,
@@ -253,7 +253,7 @@ class SimpleContextManager:
         result = PrepareResult(
             messages=messages,
             metadata=self._build_metadata(
-                session_id="",
+                conversation_id="",
                 messages=messages,
                 trim_info=trim_info,
                 turn_count=total_turns,
@@ -308,7 +308,7 @@ class SimpleContextManager:
                 logger.info(f"话题切换: {decision.new_topic_label}")
                 metrics.record_topic_switch()
                 _audit.log_topic_switch(
-                    ctx.session_id,
+                    ctx.conversation_id,
                     old_topic=ctx.current_topic.topic_label if ctx.current_topic else "无",
                     new_topic=decision.new_topic_label or "未知",
                 )
@@ -321,7 +321,7 @@ class SimpleContextManager:
                 # 步骤3: 创建新话题（热层消息由调用方在 sm.archive() 后清空，确保归档完整）
                 from .context.types import TopicSnapshot
                 ctx.current_topic = TopicSnapshot(
-                    topic_id=ctx.session_id + "-" + str(ctx.total_turns),
+                    topic_id=ctx.conversation_id + "-" + str(ctx.total_turns),
                     topic_label=decision.new_topic_label or f"话题-{ctx.total_turns + 1}",
                     start_turn=ctx.total_turns,
                     end_turn=ctx.total_turns,
@@ -420,7 +420,7 @@ class SimpleContextManager:
                 result.metadata.trim_info = trim_info
 
         # 填充元数据
-        result.metadata.session_id = ctx.session_id
+        result.metadata.conversation_id = ctx.conversation_id
         result.metadata.total_turns = ctx.total_turns
         result.metadata.warm_summary_count = len(ctx.warm_summaries)
         result.metadata.archived_topic_count = ctx.archived_topic_count
@@ -472,7 +472,7 @@ class SimpleContextManager:
             )
             ctx.warm_summaries.append(new_snapshot)
             _audit.log_summarize(
-                ctx.session_id,
+                ctx.conversation_id,
                 new_snapshot.topic_label,
                 len(overflow),
                 len(new_snapshot.summary),
@@ -554,7 +554,7 @@ class SimpleContextManager:
         """步骤2: 归档旧话题完整消息到冷层
 
         将当前热层的完整消息写入冷层归档文件。
-        文件路径: data/sessions/archive/{session_id}_{topic_id}.snapshot.json
+        文件路径: data/sessions/archive/{conversation_id}_{topic_id}.snapshot.json
         """
         import json
         from pathlib import Path
@@ -565,10 +565,10 @@ class SimpleContextManager:
         try:
             archive_dir = Path("data/sessions/archive")
             archive_dir.mkdir(parents=True, exist_ok=True)
-            path = archive_dir / f"{ctx.session_id}_{ctx.current_topic.topic_id}.snapshot.json"
+            path = archive_dir / f"{ctx.conversation_id}_{ctx.current_topic.topic_id}.snapshot.json"
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({
-                    "session_id": ctx.session_id,
+                    "conversation_id": ctx.conversation_id,
                     "topic_id": ctx.current_topic.topic_id,
                     "topic_label": ctx.current_topic.topic_label,
                     "start_turn": ctx.current_topic.start_turn,
@@ -684,7 +684,7 @@ class SimpleContextManager:
 
     def _build_metadata(
         self,
-        session_id: str,
+        conversation_id: str,
         messages: list,
         trim_info: TrimInfo,
         turn_count: int,
@@ -692,7 +692,7 @@ class SimpleContextManager:
         """构建上下文元数据"""
         token_usage = self._count_tokens(messages)
         return ContextMetadata(
-            session_id=session_id,
+            conversation_id=conversation_id,
             total_turns=turn_count,
             hot_message_count=len(messages),
             warm_summary_count=0,
@@ -777,7 +777,7 @@ class AsyncContextManager(SimpleContextManager):
             max_workers=max_workers,
             thread_name_prefix="summarizer",
         )
-        self._overflow_cache: dict[str, list[dict]] = {}  # session_id → 溢出消息
+        self._overflow_cache: dict[str, list[dict]] = {}  # conversation_id → 溢出消息
 
     async def prepare_messages_async(
         self, ctx: ConversationContext, query: str
@@ -795,8 +795,8 @@ class AsyncContextManager(SimpleContextManager):
         # 2. 如需摘要，异步执行
         trim_info = result.metadata.trim_info
         if trim_info.needs_summary and self.summarizer:
-            session_id = ctx.session_id
-            overflow = self._overflow_cache.pop(session_id, [])
+            conversation_id = ctx.conversation_id
+            overflow = self._overflow_cache.pop(conversation_id, [])
             if overflow:
                 future = asyncio.get_event_loop().run_in_executor(
                     self._executor,
@@ -806,7 +806,7 @@ class AsyncContextManager(SimpleContextManager):
                     trim_info,
                 )
                 # 摘要完成后更新温层，不阻塞当前请求
-                asyncio.create_task(self._update_warm_async(future, session_id))
+                asyncio.create_task(self._update_warm_async(future, conversation_id))
 
         return result
 
@@ -822,12 +822,12 @@ class AsyncContextManager(SimpleContextManager):
             keep_from = boundaries[-self.window_size]
             overflow = ctx.hot_messages[:keep_from]
             if overflow:
-                self._overflow_cache[ctx.session_id] = list(overflow)
+                self._overflow_cache[ctx.conversation_id] = list(overflow)
 
         return super().prepare_from_context(ctx, query)
 
     async def _update_warm_async(
-        self, future: asyncio.Future, session_id: str
+        self, future: asyncio.Future, conversation_id: str
     ) -> None:
         """摘要完成后更新温层
 
@@ -844,18 +844,18 @@ class AsyncContextManager(SimpleContextManager):
             if sm is None:
                 return
 
-            ctx = sm.get_conversation_context(session_id)
+            ctx = sm.get_conversation_context(conversation_id)
             if ctx is None:
                 return
             # 会话已结束，丢弃摘要
             if ctx.status in ("archived", "closing", "error"):
-                logger.info(f"异步摘要丢弃: 会话 {session_id} 已结束")
+                logger.info(f"异步摘要丢弃: 会话 {conversation_id} 已结束")
                 return
 
             ctx.warm_summaries.append(snapshot)
             # 持久化到 Redis
-            sm.add_warm_summary(session_id, snapshot)
-            logger.info(f"异步摘要已更新: {session_id} ({snapshot.topic_label})")
+            sm.add_warm_summary(conversation_id, snapshot)
+            logger.info(f"异步摘要已更新: {conversation_id} ({snapshot.topic_label})")
         except Exception as e:
             logger.warning(f"异步摘要更新失败（可丢弃）: {e}")
 

@@ -215,7 +215,7 @@ def _load_standard_input(json_input: str) -> StandardInput:
 
 def _auto_extract_knowledge(
     current_messages: list[dict],
-    session_id: str,
+    conversation_id: str,
     settings: "Settings",
 ) -> None:
     """自动提取本轮对话知识并提交审核
@@ -268,7 +268,7 @@ def _auto_extract_knowledge(
             or m.get("role") in ("user", "assistant")
         ][-4:]
         if k_messages:
-            kid = k_extractor.extract_and_submit(k_messages, session_id)
+            kid = k_extractor.extract_and_submit(k_messages, conversation_id)
             if kid:
                 console.print(f"  [dim]知识已提交审核: {kid[:12]}...[/dim]")
     except Exception:
@@ -293,7 +293,7 @@ def _run_standard_diagnosis(
     from .agent.context.adaptive_window import AdaptiveWindowManager
 
     session_manager = SessionManager()
-    session_id = standard_input.session_id or ""
+    conversation_id = standard_input.conversationId or ""
 
     settings = get_settings()
 
@@ -332,14 +332,14 @@ def _run_standard_diagnosis(
 
     # 构建多轮上下文（三步降级 + 摘要注入）
     prepared_result = None
-    ctx = session_manager.get_conversation_context(session_id)
-    if ctx and session_id:
+    ctx = session_manager.get_conversation_context(conversation_id)
+    if ctx and conversation_id:
         prepared_result = context_manager.prepare_from_context(
             ctx, standard_input.raw_query,
         )
         if prepared_result.messages:
             console.print(
-                f"  [dim]会话 {session_id}: 第 {session_manager.get_round_count(session_id)} 轮 "
+                f"  [dim]会话 {conversation_id}: 第 {session_manager.get_round_count(conversation_id)} 轮 "
                 f"历史已注入 ({len(prepared_result.messages)} 条消息)"
             )
 
@@ -364,14 +364,14 @@ def _run_standard_diagnosis(
             raise typer.Exit(1)
 
     # 存储本轮新增消息（成功时）
-    if standard_output.code == 0 and session_id:
+    if standard_output.code == 0 and conversation_id:
         from langchain_core.messages import messages_to_dict
         current_messages = messages_to_dict(getattr(agent, "_last_messages", []))
-        session_manager.update(session_id, standard_input.raw_query, current_messages)
+        session_manager.update(conversation_id, standard_input.raw_query, current_messages)
 
         # 自动提取本轮对话知识
         if settings.knowledge.enabled and current_messages:
-            _auto_extract_knowledge(current_messages, session_id, settings)
+            _auto_extract_knowledge(current_messages, conversation_id, settings)
 
     if standard_output.code == 0:
         console.print(Panel.fit("✅ 诊断完成", style="bold green"))
@@ -385,9 +385,9 @@ def _run_standard_diagnosis(
             console.print(f"  解决方案数量: {len(result.solution)}")
 
         # 会话状态（独立于 StandardOutput）
-        if session_id:
-            round_count = session_manager.get_round_count(session_id)
-            console.print(f"  会话: {session_id} | 第 {round_count} 轮")
+        if conversation_id:
+            round_count = session_manager.get_round_count(conversation_id)
+            console.print(f"  会话: {conversation_id} | 第 {round_count} 轮")
 
         console.print()
         console.print("  📄 标准输出JSON:")
@@ -769,7 +769,7 @@ def config():
 def chat(
     initial_question: Optional[str] = typer.Argument(None, help="初始问题（可选，不传则交互式输入）"),
     mcuid: str = typer.Option("CLI", "--mcuid", "-m", help="MCU 标识（可选，默认 CLI）"),
-    session_id: Optional[str] = typer.Option(None, "--session", "-s", help="会话ID（可选，不填自动生成）"),
+    conversation_id: Optional[str] = typer.Option(None, "--session", "-s", help="会话ID（可选，不填自动生成）"),
     output_dir: Optional[str] = typer.Option(None, "--output", "-o", help="报告输出目录"),
     generate_md: bool = typer.Option(False, "--generate-md", "-g", help="每轮诊断后生成 Markdown 报告和 CSV/JSON 数据库条目"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
@@ -778,7 +778,7 @@ def chat(
 
     为什么需要这个命令？
     - diagnose 命令是"一次性"的，进程退出后 SessionManager 内存状态就丢了。
-    - chat 命令让进程常驻，同一 session_id 在内存中连续维护，多轮最自然。
+    - chat 命令让进程常驻，同一 conversation_id 在内存中连续维护，多轮最自然。
     - 即使退出，SessionManager 会把历史持久化到 Redis（热层/温层）或磁盘，
       下次用 --session 指定同一 id 就能恢复之前的对话。
 
@@ -847,7 +847,7 @@ def chat(
     console.print(Panel.fit("🔍 故障诊断 Agent — 交互模式", style="bold blue"))
     _print_model_status(settings)
 
-    sess_id = session_id or f"chat-{uuid.uuid4().hex[:8]}"
+    sess_id = conversation_id or f"chat-{uuid.uuid4().hex[:8]}"
     agent = LangChainDiagnosticAgent(settings=settings, report_mode=generate_md)
     agent.show_tool_details = settings.tool_call.show_details
     sm = SessionManager()
@@ -918,7 +918,7 @@ def chat(
         standard_input = StandardInput(
             raw_query=query,
             mcuid=mcuid,
-            session_id=sess_id,
+            conversationId=sess_id,
             entities=StandardEntities(),
         )
 
@@ -1132,7 +1132,7 @@ def session_list(
 
 @app.command()
 def session_show(
-    session_id: str = typer.Argument(..., help="会话 ID"),
+    conversation_id: str = typer.Argument(..., help="会话 ID"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
 ):
     """查看会话详情"""
@@ -1140,16 +1140,16 @@ def session_show(
     from .agent.session_manager import SessionManager
 
     sm = SessionManager()
-    status = sm.get_session_status(session_id)
+    status = sm.get_session_status(conversation_id)
 
-    console.print(Panel.fit(f"📄 会话: {session_id}", style="bold blue"))
+    console.print(Panel.fit(f"📄 会话: {conversation_id}", style="bold blue"))
     console.print(f"  状态: [cyan]{status}[/cyan]")
 
     if status == "archived":
         # 从冷层读取
         import json
         from pathlib import Path
-        archive_path = Path("data/sessions/archive") / f"{session_id}.json"
+        archive_path = Path("data/sessions/archive") / f"{conversation_id}.json"
         if archive_path.exists():
             with open(archive_path) as f:
                 data = json.load(f)
@@ -1162,7 +1162,7 @@ def session_show(
                 label = t.get("topic_label", t.get("topic_id", "?"))
                 console.print(f"    - [{label}] {summary}...")
     else:
-        ctx = sm.get_conversation_context(session_id)
+        ctx = sm.get_conversation_context(conversation_id)
         if ctx:
             console.print(f"  总轮次: {ctx.total_turns}")
             console.print(f"  热层消息: {len(ctx.hot_messages)} 条")
@@ -1177,7 +1177,7 @@ def session_show(
 
 @app.command()
 def session_archive(
-    session_id: str = typer.Argument(..., help="会话 ID"),
+    conversation_id: str = typer.Argument(..., help="会话 ID"),
     confirm: bool = typer.Option(False, "--confirm", "-y", help="确认归档"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
 ):
@@ -1190,25 +1190,25 @@ def session_archive(
     from .agent.session_manager import SessionManager
 
     sm = SessionManager()
-    result = sm.archive(session_id)
+    result = sm.archive(conversation_id)
     if result:
-        console.print(f"[green]✅ 会话 {session_id} 已归档 ({result.total_turns} 轮)[/green]")
+        console.print(f"[green]✅ 会话 {conversation_id} 已归档 ({result.total_turns} 轮)[/green]")
     else:
-        console.print(f"[red]❌ 归档失败: 会话 {session_id} 不存在[/red]")
+        console.print(f"[red]❌ 归档失败: 会话 {conversation_id} 不存在[/red]")
 
 
 @app.command()
 def session_audit(
-    session_id: Optional[str] = typer.Argument(None, help="会话 ID（不指定则列出所有有审计日志的会话）"),
+    conversation_id: Optional[str] = typer.Argument(None, help="会话 ID（不指定则列出所有有审计日志的会话）"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
 ):
     """查看审计日志"""
     _setup_logging(verbose)
     from .agent.context.audit import audit
 
-    if session_id:
-        events = audit.read_logs(session_id)
-        console.print(Panel.fit(f"📋 审计日志: {session_id}", style="bold blue"))
+    if conversation_id:
+        events = audit.read_logs(conversation_id)
+        console.print(Panel.fit(f"📋 审计日志: {conversation_id}", style="bold blue"))
         if not events:
             console.print("  无审计日志")
         else:
@@ -1221,7 +1221,7 @@ def session_audit(
                 event = e.get("event", "")
                 detail = ", ".join(
                     f"{k}={v}" for k, v in e.items()
-                    if k not in ("event", "session_id", "_timestamp")
+                    if k not in ("event", "conversation_id", "_timestamp")
                 )
                 table.add_row(ts, event, detail[:58])
             console.print(table)
@@ -1261,6 +1261,24 @@ def session_cleanup(
     console.print(f"  删除文件: {result['deleted_files']}")
     console.print(f"  释放空间: {result['freed_bytes'] / 1024 / 1024:.1f} MB")
     console.print(f"  剩余文件: {result['remaining_files']}")
+
+
+@app.command()
+def adapter(
+    port: int = typer.Option(8000, "--port", "-p", help="监听端口"),
+    host: str = typer.Option("0.0.0.0", "--host", help="监听地址"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
+):
+    """启动平台适配层服务（FastAPI）"""
+    _setup_logging(verbose)
+    console.print(Panel.fit("🔌 EV Drive 诊断 Agent 适配层", style="bold blue"))
+    console.print(f"  监听: [cyan]{host}:{port}[/cyan]")
+    console.print(f"  API:  [dim]http://{host}:{port}/api/v1/diagnoses/async[/dim]")
+    console.print(f"  健康: [dim]http://{host}:{port}/health/live[/dim]")
+    console.print(f"  Manifest: [dim]http://{host}:{port}/.well-known/diagnostic-agent-manifest[/dim]")
+    import uvicorn
+    from .adapter.server import app
+    uvicorn.run(app, host=host, port=port, log_level="info" if verbose else "warning")
 
 
 def main():

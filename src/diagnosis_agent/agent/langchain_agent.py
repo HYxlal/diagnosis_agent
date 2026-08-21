@@ -291,6 +291,7 @@ class LangChainDiagnosticAgent:
             description=description,
             similar_cases=similar_cases,
             has_similar=has_similar,
+            search_query=query,
             history_messages=history_messages,
             prepared_messages=prepared_messages,
         )
@@ -428,6 +429,7 @@ class LangChainDiagnosticAgent:
         description: str,
         similar_cases: list[Document],
         has_similar: bool,
+        search_query: str = "",
         history_messages: list[dict] | None = None,
         prepared_messages: list | None = None,
     ) -> tuple[dict, list[ToolCallRecord], list[ReActStep]]:
@@ -443,7 +445,11 @@ class LangChainDiagnosticAgent:
         """
         if has_similar:
             cases_text = format_similar_cases_for_prompt(similar_cases)
-            user_prompt = build_similar_case_prompt(description=description, similar_cases_text=cases_text)
+            user_prompt = build_similar_case_prompt(
+                description=description,
+                similar_cases_text=cases_text,
+                search_query=search_query,
+            )
         else:
             user_prompt = build_no_similar_case_prompt(description=description)
 

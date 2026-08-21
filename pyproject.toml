@@ -31,6 +31,9 @@ dependencies = [
     "requests>=2.28",
     "neo4j>=5.22.0,<6.0",
     "tiktoken",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "httpx>=0.25.0",
 ]
 
 [project.optional-dependencies]

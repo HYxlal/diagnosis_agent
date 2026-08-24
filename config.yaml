@@ -15,7 +15,7 @@
 #   ✅ qwen3.7-max-preview — 可用，长上下文
 #   ✅ deepseek-v3.1 — 可用
 llm:
-  model: "qwen3.5-plus"
+  model: "deepseek-v3.1"
   temperature: 0.3
   max_tokens: 4096
   api_key: "${DASHSCOPE_API_KEY}"

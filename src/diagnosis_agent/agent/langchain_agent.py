@@ -251,7 +251,18 @@ class LangChainDiagnosticAgent:
             # Neo4j 结构化召回
             try:
                 neo4j_candidates = self._retriever.neo4j.structured_recall(
-                    vehicleModel=parsed_input.mcuid if parsed_input.mcuid else None,
+                    vehicleModel=parsed_input.vehicleModel if parsed_input.vehicleModel else None,
+                    dtc_codes=parsed_input.dtcCode if parsed_input.dtcCode else None,
+                    indicators=[
+                        i.value for i in parsed_input.instrumentIndicatorList
+                        if i.value and i.value != "无"
+                    ] if parsed_input.instrumentIndicatorList else None,
+                    scenarios=[
+                        parsed_input.faultWorkConditionList.value
+                    ] if parsed_input.faultWorkConditionList.value != "无法确认故障工况" else None,
+                    softwareVersion=parsed_input.softwareVersion if parsed_input.softwareVersion else None,
+                    motorPosition=parsed_input.motorPosition.value if parsed_input.motorPosition.value != "无法确认具体电机" else None,
+                    VIN=parsed_input.VIN if parsed_input.VIN else None,
                     limit=5, depth=2
                 )
                 neo4j_docs = [c.to_document() for c in neo4j_candidates]

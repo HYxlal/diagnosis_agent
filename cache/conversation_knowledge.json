@@ -189,6 +189,206 @@
       "review_time": null,
       "review_comment": null,
       "created_at": "2026-08-20T11:14:51.044579"
+    },
+    {
+      "knowledge_id": "3917f3aa-b6a6-4a12-8864-da5df3fd1f03",
+      "conversation_id": "",
+      "extracted_entities": [
+        {
+          "entity_id": "159a17f1-95ba-4f0b-8cdb-1c789b02a813",
+          "entity_name": "IGBT过温故障",
+          "entity_type": "现象",
+          "description": "车辆爬坡时动力中断和仪表亮电机故障红灯的现象"
+        },
+        {
+          "entity_id": "0fe247b0-b5d7-4359-a236-bb37946c200f",
+          "entity_name": "NTC温度采样异常",
+          "entity_type": "根因",
+          "description": "温度采样系统问题导致温度采样信号异常"
+        },
+        {
+          "entity_id": "0dfe70a9-bf31-42d3-8c00-070d8477dee0",
+          "entity_name": "PCB焊接质量问题",
+          "entity_type": "根因",
+          "description": "硬件焊接质量问题导致温度采样失真"
+        },
+        {
+          "entity_id": "eea248e8-252e-4088-bceb-cf68de6c215c",
+          "entity_name": "散热系统效能不足",
+          "entity_type": "根因",
+          "description": "爬坡工况下散热系统无法及时散热"
+        },
+        {
+          "entity_id": "a1de269a-9e8b-4741-b379-692a7991a550",
+          "entity_name": "检查IGBT温度采样电路",
+          "entity_type": "对策",
+          "description": "检查NTC传感器及其连接线路"
+        },
+        {
+          "entity_id": "e6838992-64ea-467a-b52e-60249a5794bb",
+          "entity_name": "检查PCB焊接质量",
+          "entity_type": "对策",
+          "description": "检查32JT芯片和相关功率器件的焊接状态"
+        },
+        {
+          "entity_id": "5e6be723-59d0-4c24-bc26-0e499362ee3c",
+          "entity_name": "检查散热系统工作状态",
+          "entity_type": "对策",
+          "description": "检查冷却液循环和散热风扇"
+        },
+        {
+          "entity_id": "44dee076-a811-44fb-a776-1c1e54598fb2",
+          "entity_name": "更换MCU总成",
+          "entity_type": "对策",
+          "description": "如发现硬件问题时的解决方案"
+        },
+        {
+          "entity_id": "bad60eb6-b5af-413d-8058-4aa3d7464dd6",
+          "entity_name": "电机故障红灯",
+          "entity_type": "仪表指示灯",
+          "description": "仪表上亮起的故障指示灯"
+        },
+        {
+          "entity_id": "2181e15e-5ece-48e0-bc94-6c6fed96f8eb",
+          "entity_name": "爬坡工况",
+          "entity_type": "故障场景",
+          "description": "车辆爬坡时大功率输出的场景"
+        }
+      ],
+      "extracted_relationships": [
+        {
+          "source_id": "IGBT过温故障",
+          "target_id": "NTC温度采样异常",
+          "relation_type": "由...引起",
+          "description": "温度采样异常导致过温故障",
+          "weight": 0.8
+        },
+        {
+          "source_id": "IGBT过温故障",
+          "target_id": "PCB焊接质量问题",
+          "relation_type": "由...引起",
+          "description": "焊接质量问题导致过温故障",
+          "weight": 0.7
+        },
+        {
+          "source_id": "IGBT过温故障",
+          "target_id": "散热系统效能不足",
+          "relation_type": "由...引起",
+          "description": "散热不足导致过温故障",
+          "weight": 0.6
+        },
+        {
+          "source_id": "NTC温度采样异常",
+          "target_id": "检查IGBT温度采样电路",
+          "relation_type": "对应对策",
+          "description": "针对采样异常的检查对策",
+          "weight": 0.9
+        },
+        {
+          "source_id": "PCB焊接质量问题",
+          "target_id": "检查PCB焊接质量",
+          "relation_type": "对应对策",
+          "description": "针对焊接质量问题的检查对策",
+          "weight": 0.9
+        },
+        {
+          "source_id": "散热系统效能不足",
+          "target_id": "检查散热系统工作状态",
+          "relation_type": "对应对策",
+          "description": "针对散热不足的检查对策",
+          "weight": 0.8
+        },
+        {
+          "source_id": "PCB焊接质量问题",
+          "target_id": "更换MCU总成",
+          "relation_type": "对应对策",
+          "description": "针对硬件问题的更换对策",
+          "weight": 0.7
+        },
+        {
+          "source_id": "检查IGBT温度采样电路",
+          "target_id": "IGBT过温故障",
+          "relation_type": "适用于",
+          "description": "采样检查适用于过温故障",
+          "weight": 0.9
+        },
+        {
+          "source_id": "检查PCB焊接质量",
+          "target_id": "IGBT过温故障",
+          "relation_type": "适用于",
+          "description": "焊接检查适用于过温故障",
+          "weight": 0.8
+        },
+        {
+          "source_id": "检查散热系统工作状态",
+          "target_id": "IGBT过温故障",
+          "relation_type": "适用于",
+          "description": "散热检查适用于过温故障",
+          "weight": 0.7
+        },
+        {
+          "source_id": "更换MCU总成",
+          "target_id": "IGBT过温故障",
+          "relation_type": "适用于",
+          "description": "更换总成适用于过温故障",
+          "weight": 0.6
+        },
+        {
+          "source_id": "IGBT过温故障",
+          "target_id": "爬坡工况",
+          "relation_type": "发生于",
+          "description": "过温故障发生在爬坡场景",
+          "weight": 0.9
+        },
+        {
+          "source_id": "IGBT过温故障",
+          "target_id": "电机故障红灯",
+          "relation_type": "亮起",
+          "description": "过温故障导致仪表亮红灯",
+          "weight": 0.9
+        },
+        {
+          "source_id": "检查PCB焊接质量",
+          "target_id": "PCB焊接质量问题",
+          "relation_type": "排除",
+          "description": "焊接检查可以排除焊接质量问题",
+          "weight": 0.8
+        },
+        {
+          "source_id": "检查IGBT温度采样电路",
+          "target_id": "NTC温度采样异常",
+          "relation_type": "排除",
+          "description": "采样检查可以排除采样异常问题",
+          "weight": 0.9
+        },
+        {
+          "source_id": "检查散热系统工作状态",
+          "target_id": "散热系统效能不足",
+          "relation_type": "排除",
+          "description": "散热检查可以排除散热不足问题",
+          "weight": 0.8
+        },
+        {
+          "source_id": "NTC温度采样异常",
+          "target_id": "PCB焊接质量问题",
+          "relation_type": "并存",
+          "description": "采样异常和焊接质量问题可能同时存在",
+          "weight": 0.7
+        },
+        {
+          "source_id": "PCB焊接质量问题",
+          "target_id": "散热系统效能不足",
+          "relation_type": "并存",
+          "description": "焊接问题和散热问题可能同时存在",
+          "weight": 0.6
+        }
+      ],
+      "conversation_context": "助手: 我来分析这个IGBT过温故障。首先让我仔细分析预检索结果与当前故障的关联性。\n\n从预检索结果来看，有几个工单与当前故障高度相关：\n\n1. **工单1** (REC-464afc3e91f5)：IGBT模块温度采样信号开路，PCB分层脱焊问题\n2. **工单2** (REC-dc691ca97e85)：IGBT温度采样超范围低，NTC采样异常\n3. **工单4** (REC-fd2a322fd2eb)：颠簸路后全油门加速抛锚，IGBT上桥臂退饱和\n\n当前故障的特点是：**爬坡时动力中断 + 仪表亮电机故障红灯 + IGBT过温**。让我进一步检索更精确的相似\n助手: 让我再查看一下工单4的详细信息，因为它与爬坡场景最相关：\n助手: 让我再查看工单5的详细信息，因为它涉及硬件问题\n助手: 基于预检索结果和进一步分析，我现在可以给出诊断结论。\n\n## 诊断结论\n\n根据故障描述\"IGBT过温故障，车辆爬坡时动力中断，仪表亮电机故障红灯\"以及历史工单分析，该故障属于典型的**过温故障**。\n\n**根因分析：**\n1. **NTC温度采样异常**：爬坡时电机负载增大，IGBT发热量增加，但温度采样系统可能存在问题，如PCB分层脱焊、NTC传感器开路或虚焊，导致温度采样信号异常\n2. **硬件焊接质量问题**：从历史工单看，IGBT模块相关的PCB焊接质量问题频发，包括32JT芯片虚焊、排线焊脚异物等问题\n3. **散热系统效能不足**：爬坡工况下电机持续大功率输出，散热系统可能无法及时散热，导致IGBT实际温度升高\n\n**解决方案：**\n1. 检查IGBT温度采样电路，特别是NTC传感器及其连接线路\n2. 检查PCB焊接质量，重点排查32JT芯片和相关功率器件的焊接状态\n3. 检查散热系统工作状态，包括冷却液循环、散热风扇等\n4. 如发现硬件问题，更换MCU总成\n\n**风险提示：**\n该故障属于**V2中风险**，爬坡时动力中断可能影响行车安全，但通常不会立即导致严重事故。建议尽快检修，避免长时间大负荷运行。\n\n**维护建议：**\n定期检查电驱系统冷却系统，确保散热效能；在质保期内重点关注IGBT模块相关故障。\n\n```json\n{\n  \"fault_root_cause\": [\"NTC温度采样电路异常\", \"PCB焊接质量问题导致温度采样失真\", \"爬坡工况散热不足导致IGBT实际温度升高\"],\n  \"fault_trigger_condition\": \"车辆爬坡时大功率输出，IGBT发热量增大，温度采样系统异常触发过温保护\",\n  \"classification\": \"过温故障\",\n  \"solution\": [\"检查IGBT温度采样电路和NTC传感器\", \"检查PCB焊接质量，特别是功率器件焊接\", \"检查散热系统工作状态\", \"必要时更换MCU总成\"],\n  \"risk_warning\": \"V2\",\n  \"maintenance_suggestions\": \"定期检查电驱冷却系统，避免长时间大负荷运行，关注IGBT模块相关故障\",\n  \"confidence\": 0.82,\n  \"reasoning_narrative\": \"基于历史工单分析，多个相似案例显示IGBT过温故障主要源于温度采样系统异常。工单1显示PCB分层脱焊导致NTC采样开路，工单2显示NTC采样超范围低，工单4显示颠簸路后IGBT退饱和故障。当前故障在爬坡时发生，属于大负荷工况，结合仪表亮电机故障红灯，判断为硬件层面的温度采样或散热问题。爬坡时动力中断表明系统触发了过温保护机制，但实际温度可能并未达到危险水平，而是采样系统误报所致。建议优先检查温度采样电路和PCB焊接质量。\"\n}\n```",
+      "status": "pending",
+      "reviewer": null,
+      "review_time": null,
+      "review_comment": null,
+      "created_at": "2026-08-24T15:28:40.612060"
     }
   ],
   "processed_knowledge": {
@@ -2090,17 +2290,217 @@
       "review_time": "2026-08-20T11:20:08.759876",
       "review_comment": "测试2",
       "created_at": "2026-08-20T11:18:25.190319"
+    },
+    "3917f3aa-b6a6-4a12-8864-da5df3fd1f03": {
+      "knowledge_id": "3917f3aa-b6a6-4a12-8864-da5df3fd1f03",
+      "conversation_id": "",
+      "extracted_entities": [
+        {
+          "entity_id": "159a17f1-95ba-4f0b-8cdb-1c789b02a813",
+          "entity_name": "IGBT过温故障",
+          "entity_type": "现象",
+          "description": "车辆爬坡时动力中断和仪表亮电机故障红灯的现象"
+        },
+        {
+          "entity_id": "0fe247b0-b5d7-4359-a236-bb37946c200f",
+          "entity_name": "NTC温度采样异常",
+          "entity_type": "根因",
+          "description": "温度采样系统问题导致温度采样信号异常"
+        },
+        {
+          "entity_id": "0dfe70a9-bf31-42d3-8c00-070d8477dee0",
+          "entity_name": "PCB焊接质量问题",
+          "entity_type": "根因",
+          "description": "硬件焊接质量问题导致温度采样失真"
+        },
+        {
+          "entity_id": "eea248e8-252e-4088-bceb-cf68de6c215c",
+          "entity_name": "散热系统效能不足",
+          "entity_type": "根因",
+          "description": "爬坡工况下散热系统无法及时散热"
+        },
+        {
+          "entity_id": "a1de269a-9e8b-4741-b379-692a7991a550",
+          "entity_name": "检查IGBT温度采样电路",
+          "entity_type": "对策",
+          "description": "检查NTC传感器及其连接线路"
+        },
+        {
+          "entity_id": "e6838992-64ea-467a-b52e-60249a5794bb",
+          "entity_name": "检查PCB焊接质量",
+          "entity_type": "对策",
+          "description": "检查32JT芯片和相关功率器件的焊接状态"
+        },
+        {
+          "entity_id": "5e6be723-59d0-4c24-bc26-0e499362ee3c",
+          "entity_name": "检查散热系统工作状态",
+          "entity_type": "对策",
+          "description": "检查冷却液循环和散热风扇"
+        },
+        {
+          "entity_id": "44dee076-a811-44fb-a776-1c1e54598fb2",
+          "entity_name": "更换MCU总成",
+          "entity_type": "对策",
+          "description": "如发现硬件问题时的解决方案"
+        },
+        {
+          "entity_id": "bad60eb6-b5af-413d-8058-4aa3d7464dd6",
+          "entity_name": "电机故障红灯",
+          "entity_type": "仪表指示灯",
+          "description": "仪表上亮起的故障指示灯"
+        },
+        {
+          "entity_id": "2181e15e-5ece-48e0-bc94-6c6fed96f8eb",
+          "entity_name": "爬坡工况",
+          "entity_type": "故障场景",
+          "description": "车辆爬坡时大功率输出的场景"
+        }
+      ],
+      "extracted_relationships": [
+        {
+          "source_id": "IGBT过温故障",
+          "target_id": "NTC温度采样异常",
+          "relation_type": "由...引起",
+          "description": "温度采样异常导致过温故障",
+          "weight": 0.8
+        },
+        {
+          "source_id": "IGBT过温故障",
+          "target_id": "PCB焊接质量问题",
+          "relation_type": "由...引起",
+          "description": "焊接质量问题导致过温故障",
+          "weight": 0.7
+        },
+        {
+          "source_id": "IGBT过温故障",
+          "target_id": "散热系统效能不足",
+          "relation_type": "由...引起",
+          "description": "散热不足导致过温故障",
+          "weight": 0.6
+        },
+        {
+          "source_id": "NTC温度采样异常",
+          "target_id": "检查IGBT温度采样电路",
+          "relation_type": "对应对策",
+          "description": "针对采样异常的检查对策",
+          "weight": 0.9
+        },
+        {
+          "source_id": "PCB焊接质量问题",
+          "target_id": "检查PCB焊接质量",
+          "relation_type": "对应对策",
+          "description": "针对焊接质量问题的检查对策",
+          "weight": 0.9
+        },
+        {
+          "source_id": "散热系统效能不足",
+          "target_id": "检查散热系统工作状态",
+          "relation_type": "对应对策",
+          "description": "针对散热不足的检查对策",
+          "weight": 0.8
+        },
+        {
+          "source_id": "PCB焊接质量问题",
+          "target_id": "更换MCU总成",
+          "relation_type": "对应对策",
+          "description": "针对硬件问题的更换对策",
+          "weight": 0.7
+        },
+        {
+          "source_id": "检查IGBT温度采样电路",
+          "target_id": "IGBT过温故障",
+          "relation_type": "适用于",
+          "description": "采样检查适用于过温故障",
+          "weight": 0.9
+        },
+        {
+          "source_id": "检查PCB焊接质量",
+          "target_id": "IGBT过温故障",
+          "relation_type": "适用于",
+          "description": "焊接检查适用于过温故障",
+          "weight": 0.8
+        },
+        {
+          "source_id": "检查散热系统工作状态",
+          "target_id": "IGBT过温故障",
+          "relation_type": "适用于",
+          "description": "散热检查适用于过温故障",
+          "weight": 0.7
+        },
+        {
+          "source_id": "更换MCU总成",
+          "target_id": "IGBT过温故障",
+          "relation_type": "适用于",
+          "description": "更换总成适用于过温故障",
+          "weight": 0.6
+        },
+        {
+          "source_id": "IGBT过温故障",
+          "target_id": "爬坡工况",
+          "relation_type": "发生于",
+          "description": "过温故障发生在爬坡场景",
+          "weight": 0.9
+        },
+        {
+          "source_id": "IGBT过温故障",
+          "target_id": "电机故障红灯",
+          "relation_type": "亮起",
+          "description": "过温故障导致仪表亮红灯",
+          "weight": 0.9
+        },
+        {
+          "source_id": "检查PCB焊接质量",
+          "target_id": "PCB焊接质量问题",
+          "relation_type": "排除",
+          "description": "焊接检查可以排除焊接质量问题",
+          "weight": 0.8
+        },
+        {
+          "source_id": "检查IGBT温度采样电路",
+          "target_id": "NTC温度采样异常",
+          "relation_type": "排除",
+          "description": "采样检查可以排除采样异常问题",
+          "weight": 0.9
+        },
+        {
+          "source_id": "检查散热系统工作状态",
+          "target_id": "散热系统效能不足",
+          "relation_type": "排除",
+          "description": "散热检查可以排除散热不足问题",
+          "weight": 0.8
+        },
+        {
+          "source_id": "NTC温度采样异常",
+          "target_id": "PCB焊接质量问题",
+          "relation_type": "并存",
+          "description": "采样异常和焊接质量问题可能同时存在",
+          "weight": 0.7
+        },
+        {
+          "source_id": "PCB焊接质量问题",
+          "target_id": "散热系统效能不足",
+          "relation_type": "并存",
+          "description": "焊接问题和散热问题可能同时存在",
+          "weight": 0.6
+        }
+      ],
+      "conversation_context": "助手: 我来分析这个IGBT过温故障。首先让我仔细分析预检索结果与当前故障的关联性。\n\n从预检索结果来看，有几个工单与当前故障高度相关：\n\n1. **工单1** (REC-464afc3e91f5)：IGBT模块温度采样信号开路，PCB分层脱焊问题\n2. **工单2** (REC-dc691ca97e85)：IGBT温度采样超范围低，NTC采样异常\n3. **工单4** (REC-fd2a322fd2eb)：颠簸路后全油门加速抛锚，IGBT上桥臂退饱和\n\n当前故障的特点是：**爬坡时动力中断 + 仪表亮电机故障红灯 + IGBT过温**。让我进一步检索更精确的相似\n助手: 让我再查看一下工单4的详细信息，因为它与爬坡场景最相关：\n助手: 让我再查看工单5的详细信息，因为它涉及硬件问题\n助手: 基于预检索结果和进一步分析，我现在可以给出诊断结论。\n\n## 诊断结论\n\n根据故障描述\"IGBT过温故障，车辆爬坡时动力中断，仪表亮电机故障红灯\"以及历史工单分析，该故障属于典型的**过温故障**。\n\n**根因分析：**\n1. **NTC温度采样异常**：爬坡时电机负载增大，IGBT发热量增加，但温度采样系统可能存在问题，如PCB分层脱焊、NTC传感器开路或虚焊，导致温度采样信号异常\n2. **硬件焊接质量问题**：从历史工单看，IGBT模块相关的PCB焊接质量问题频发，包括32JT芯片虚焊、排线焊脚异物等问题\n3. **散热系统效能不足**：爬坡工况下电机持续大功率输出，散热系统可能无法及时散热，导致IGBT实际温度升高\n\n**解决方案：**\n1. 检查IGBT温度采样电路，特别是NTC传感器及其连接线路\n2. 检查PCB焊接质量，重点排查32JT芯片和相关功率器件的焊接状态\n3. 检查散热系统工作状态，包括冷却液循环、散热风扇等\n4. 如发现硬件问题，更换MCU总成\n\n**风险提示：**\n该故障属于**V2中风险**，爬坡时动力中断可能影响行车安全，但通常不会立即导致严重事故。建议尽快检修，避免长时间大负荷运行。\n\n**维护建议：**\n定期检查电驱系统冷却系统，确保散热效能；在质保期内重点关注IGBT模块相关故障。\n\n```json\n{\n  \"fault_root_cause\": [\"NTC温度采样电路异常\", \"PCB焊接质量问题导致温度采样失真\", \"爬坡工况散热不足导致IGBT实际温度升高\"],\n  \"fault_trigger_condition\": \"车辆爬坡时大功率输出，IGBT发热量增大，温度采样系统异常触发过温保护\",\n  \"classification\": \"过温故障\",\n  \"solution\": [\"检查IGBT温度采样电路和NTC传感器\", \"检查PCB焊接质量，特别是功率器件焊接\", \"检查散热系统工作状态\", \"必要时更换MCU总成\"],\n  \"risk_warning\": \"V2\",\n  \"maintenance_suggestions\": \"定期检查电驱冷却系统，避免长时间大负荷运行，关注IGBT模块相关故障\",\n  \"confidence\": 0.82,\n  \"reasoning_narrative\": \"基于历史工单分析，多个相似案例显示IGBT过温故障主要源于温度采样系统异常。工单1显示PCB分层脱焊导致NTC采样开路，工单2显示NTC采样超范围低，工单4显示颠簸路后IGBT退饱和故障。当前故障在爬坡时发生，属于大负荷工况，结合仪表亮电机故障红灯，判断为硬件层面的温度采样或散热问题。爬坡时动力中断表明系统触发了过温保护机制，但实际温度可能并未达到危险水平，而是采样系统误报所致。建议优先检查温度采样电路和PCB焊接质量。\"\n}\n```",
+      "status": "pending",
+      "reviewer": null,
+      "review_time": null,
+      "review_comment": null,
+      "created_at": "2026-08-24T15:28:40.612060"
     }
   },
   "stats": {
-    "extractions": 15,
-    "entities_extracted": 163,
-    "relationships_extracted": 102,
-    "submitted_for_review": 15,
+    "extractions": 16,
+    "entities_extracted": 173,
+    "relationships_extracted": 120,
+    "submitted_for_review": 16,
     "approved_knowledge": 10,
     "rejected_knowledge": 4,
     "errors": 2,
     "merged_entities": 25
   },
-  "saved_at": "2026-08-20T11:28:48.472518"
+  "saved_at": "2026-08-24T15:28:40.613065"
 }

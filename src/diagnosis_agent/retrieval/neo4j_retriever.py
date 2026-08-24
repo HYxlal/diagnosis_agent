@@ -107,9 +107,15 @@ class Neo4jFaultRetriever(FaultRetriever):
 
         Returns:
             FaultCandidate 列表；Neo4j 不可用时返回空列表（不抛异常），查不到跳过。
+            所有字段都为空时直接返回空列表（不做无意义查询，由上层走 Chroma 语义兜底）。
         """
         if not self.available:
             logger.info("Neo4j 召回不可用，返回空列表（上层走 Chroma 兜底）")
+            return []
+
+        # 所有字段都为空时不执行无意义查询，直接返回空
+        if not vehicleModel and not dtc_codes and not indicators and not scenarios and not softwareVersion and not motorPosition and not VIN:
+            logger.info("所有字段为空，跳过 Neo4j 召回（上层走 Chroma 语义兜底）")
             return []
 
         motor_list = [vehicleModel] if vehicleModel else None

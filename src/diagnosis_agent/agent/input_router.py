@@ -16,8 +16,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from ..models.input import InputIntent, InputType, ParsedInput, StandardEntities
-from ..parsers.field_extractor import FieldExtractor
+from ..models.input import InputIntent, InputType, ParsedInput
 
 logger = logging.getLogger(__name__)
 
@@ -67,21 +66,6 @@ class InputRouter:
 
         parsed_input.intent = InputIntent.DIAGNOSTIC_QUERY
         parsed_input.search_query = text
-
-        # 字段提取（仅当 entities 为空时）
-        if parsed_input.entities is None:
-            try:
-                extractor = FieldExtractor()
-                record = extractor.extract(text)
-                parsed_input.entities = StandardEntities(
-                    dtc_code=[record.dtc_code] if record.dtc_code else [],
-                    project=record.vehicle_type or "",
-                    component="",
-                    working_condition=record.fault_scenario or "",
-                    software_version="",
-                )
-            except Exception as e:
-                logger.warning(f"字段提取失败: {e}")
 
         logger.info(f"InputRouter: intent=diagnostic_query, query={text[:50]}")
         return parsed_input

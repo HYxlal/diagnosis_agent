@@ -30,7 +30,7 @@ from .agent.langchain_agent import LangChainDiagnosticAgent
 from .config import Settings, get_settings, reset_settings
 from .models.converter import diagnostic_output_to_standard
 from .models.diagnostic_output import OutputCode, StandardOutput
-from .models.input import InputIntent, InputType, ParsedInput, StandardEntities, StandardInput
+from .models.input import InputIntent, InputType, ParsedInput, StandardInput
 from .models.incident import IncidentRecord
 from .parsers.unified import parse_input
 from .reporting.entries import generate_both as generate_db_entries
@@ -468,8 +468,10 @@ def _run_traditional_diagnosis(
     if std_output:
         temp_standard_input = StandardInput(
             raw_query=parsed.description,
-            mcuid="CLI",
-            entities=StandardEntities(),
+            vehicleModel="CLI",
+            VIN="",
+            faultOccurTime="",
+            mileage=0.0,
         )
         standard_output = diagnostic_output_to_standard(output, temp_standard_input)
         console.print(Panel.fit("📋 标准JSON输出", style="bold blue"))
@@ -917,9 +919,11 @@ def chat(
 
         standard_input = StandardInput(
             raw_query=query,
-            mcuid=mcuid,
+            vehicleModel=mcuid,
             conversationId=sess_id,
-            entities=StandardEntities(),
+            VIN="",
+            faultOccurTime="",
+            mileage=0.0,
         )
 
         # 构建上下文（三步降级 + 摘要注入）

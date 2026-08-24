@@ -9,13 +9,15 @@
 返回统一 list[Document]，metadata 带 source 标签（"neo4j" / "chroma"）。
 
 字段分通道匹配设计：
-每个字段独立走自己的匹配路径，不强制拼进 keyword：
-  - vehicleModel          → Neo4j motor_codes 独立匹配 / Chroma metadata vehicle_type 独立过滤
-  - dtcCode               → Neo4j dtc_inputs 独立匹配 / Chroma metadata dtc_code 独立过滤
-  - faultWorkConditionList → Neo4j scenarios 独立匹配 / Chroma metadata fault_scenario 独立过滤
-  - instrumentIndicatorList → Neo4j indicators 独立匹配 / Chroma metadata dashboard_indicator 独立过滤
-  - softwareVersion/motorPosition/VIN → keyword 补充通道
-空字段自动跳过，不做强过滤。
+所有字段各自独立走匹配路径，不做任何字段拼接：
+  - vehicleModel          → Neo4j MotorType.code / Chroma vehicle_type
+  - dtcCode               → Neo4j DTC.code / Chroma dtc_code
+  - faultWorkConditionList → Neo4j Scenario / Chroma fault_scenario
+  - instrumentIndicatorList → Neo4j Indicator.name / Chroma dashboard_indicator
+  - softwareVersion       → Neo4j Fault.software_version / Chroma software_version
+  - motorPosition         → Neo4j Fault.motor_position / Chroma motor_position
+  - VIN                   → Neo4j Fault.vin / Chroma vin
+空字段自动跳过，数据库里查不到就跳过，不做强过滤。
 """
 
 from __future__ import annotations
@@ -187,7 +189,7 @@ class HybridRetriever(FaultRetriever, BaseRetriever):
     # ------------------------------------------------------------------
 
     def _neo4j_recall(self, condition: SearchCondition) -> list:
-        """调用 Neo4j 结构化召回 — 字段分通道独立匹配，不强拼keyword"""
+        """调用 Neo4j 结构化召回 — 所有字段各自独立走自己的匹配通道，不拼keyword"""
         if not self._neo4j.available:
             return []
 
@@ -196,13 +198,15 @@ class HybridRetriever(FaultRetriever, BaseRetriever):
         if condition.faultWorkConditionList and condition.faultWorkConditionList != "无法确认故障工况":
             scenarios = [condition.faultWorkConditionList]
 
-        # 走各字段独立通道
+        # 所有字段各自独立传参，数据库里没有对应字段就查不到，跳过
         return self._neo4j.structured_recall(
             vehicleModel=condition.vehicleModel if condition.vehicleModel else None,
             dtc_codes=condition.dtcCode if condition.dtcCode else None,
             indicators=condition.instrumentIndicatorList if condition.instrumentIndicatorList else None,
             scenarios=scenarios if scenarios else None,
-            keyword=condition.to_keyword() or None,
+            softwareVersion=condition.softwareVersion if condition.softwareVersion else None,
+            motorPosition=condition.motorPosition if condition.motorPosition and condition.motorPosition != "无法确认具体电机" else None,
+            VIN=condition.VIN if condition.VIN else None,
         )
 
     # ------------------------------------------------------------------
@@ -215,31 +219,37 @@ class HybridRetriever(FaultRetriever, BaseRetriever):
         top_k: int,
         condition: SearchCondition,
     ) -> list[Document]:
-        """Chroma 语义检索兜底 — 各字段走独立 metadata 过滤通道，不强拼到文本"""
+        """Chroma 语义检索兜底 — 各字段走独立 metadata 过滤通道，不强拼到文本
+
+        所有字段各自独立走 metadata 过滤，不做文本拼接。
+        数据库里没有对应 metadata 字段就查不到，跳过。
+        """
         # 构建独立 metadata 过滤条件
         filters = {}
         if condition.vehicleModel:
             filters["vehicle_type"] = condition.vehicleModel
         if condition.dtcCode and len(condition.dtcCode) > 0:
-            # Chroma metadata 里 dtc_code 是字符串，有DTC码的直接精确匹配
             filters["dtc_code"] = condition.dtcCode[0]
-
-        # 查询增强文本：仅补充没有独立metadata通道的字段
-        enriched_query_parts = [query]
-        kw = condition.to_keyword()
-        if kw:
-            enriched_query_parts.append(kw)
-        enriched_query = " ".join(enriched_query_parts)
+        if condition.faultWorkConditionList and condition.faultWorkConditionList != "无法确认故障工况":
+            filters["fault_scenario"] = condition.faultWorkConditionList
+        if condition.instrumentIndicatorList:
+            valid = [i for i in condition.instrumentIndicatorList if i != "无"]
+            if valid:
+                filters["dashboard_indicator"] = valid[0]
+        if condition.softwareVersion:
+            filters["software_version"] = condition.softwareVersion
+        if condition.motorPosition and condition.motorPosition != "无法确认具体电机":
+            filters["motor_position"] = condition.motorPosition
 
         try:
             if hasattr(self._chroma, "search_with_filters"):
                 docs = self._chroma.search_with_filters(
-                    query=enriched_query,
+                    query=query,  # 不拼接任何字段，纯原始查询
                     vehicle_type=filters.get("vehicle_type"),
                     top_k=top_k,
                 )
             else:
-                docs = self._chroma.invoke(enriched_query)[:top_k]
+                docs = self._chroma.invoke(query)[:top_k]  # 纯语义检索
         except Exception as e:
             logger.error(f"Chroma 兜底检索失败: {e}")
             return []

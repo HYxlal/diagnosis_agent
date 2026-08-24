@@ -207,7 +207,7 @@ class TestSimpleContextManager:
 
         result = cm.prepare_from_context(ctx, "当前问题")
         assert len(result.messages) == 3  # 历史2 + 当前1
-        assert result.metadata.session_id == "test-session"
+        assert result.metadata.conversation_id == "test-session"
         assert result.metadata.total_turns == 1
 
 
@@ -216,7 +216,7 @@ class TestConversationContext:
 
     def test_create_new(self):
         ctx = ConversationContext.create_new("sess-1")
-        assert ctx.session_id == "sess-1"
+        assert ctx.conversation_id == "sess-1"
         assert ctx.total_turns == 0
         assert ctx.hot_messages == []
         assert ctx.warm_summaries == []
@@ -257,7 +257,7 @@ class TestConversationContext:
 
         data = ctx.to_dict()
         restored = ConversationContext.from_dict(data)
-        assert restored.session_id == "sess-1"
+        assert restored.conversation_id == "sess-1"
         assert restored.total_turns == 3
         assert restored.hot_messages == ctx.hot_messages
         assert len(restored.warm_summaries) == 1
@@ -267,7 +267,7 @@ class TestConversationContext:
     def test_from_dict_minimal(self):
         """最小数据反序列化"""
         ctx = ConversationContext.from_dict({})
-        assert ctx.session_id == ""
+        assert ctx.conversation_id == ""
         assert ctx.hot_messages == []
         assert ctx.total_turns == 0
 

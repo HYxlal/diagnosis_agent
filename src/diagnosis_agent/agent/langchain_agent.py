@@ -250,11 +250,9 @@ class LangChainDiagnosticAgent:
             similar_cases = self._retriever.semantic_search(query=query, top_k=5)
             # Neo4j 结构化召回
             try:
-                neo4j_keywords = query
-                if parsed_input.mcuid:
-                    neo4j_keywords = f"{neo4j_keywords} {parsed_input.mcuid}"
                 neo4j_candidates = self._retriever.neo4j.structured_recall(
-                    keyword=neo4j_keywords, limit=5, depth=2
+                    vehicleModel=parsed_input.mcuid if parsed_input.mcuid else None,
+                    limit=5, depth=2
                 )
                 neo4j_docs = [c.to_document() for c in neo4j_candidates]
                 # 合并去重（按 record_id）
@@ -383,28 +381,27 @@ class LangChainDiagnosticAgent:
     ) -> DatabaseEntry:
         """构建可录入数据库的结构化条目
 
-        字段来源优先级：entities（平台 NLP 实体）> bulk_records（文件解析记录）。
+        字段直接从 ParsedInput 扁平化字段取值，不再经过 entities 中间对象。
         根因、对策、置信度来自 LLM 推理结果（reasoning_result）。
         """
-        entities = parsed_input.entities
         description = parsed_input.description or ""
 
-        # 字段回退顺序：entities → bulk_records
+        # 字段直接从 ParsedInput 扁平化字段取值
         dtc_code = ""
-        if entities and entities.dtc_code:
-            dtc_code = ", ".join(entities.dtc_code)
+        if parsed_input.dtcCode:
+            dtc_code = ", ".join(parsed_input.dtcCode)
         else:
             dtc_code = self._extract_from_records(parsed_input, "dtc_code")
 
         vehicle_type = ""
-        if entities and entities.project:
-            vehicle_type = entities.project
+        if parsed_input.vehicleModel:
+            vehicle_type = parsed_input.vehicleModel
         else:
             vehicle_type = self._extract_from_records(parsed_input, "vehicle_type")
 
         fault_scenario = ""
-        if entities and entities.working_condition:
-            fault_scenario = entities.working_condition
+        if parsed_input.faultWorkConditionList and parsed_input.faultWorkConditionList.value != "无法确认故障工况":
+            fault_scenario = parsed_input.faultWorkConditionList.value
         else:
             fault_scenario = self._extract_from_records(parsed_input, "fault_scenario")
 

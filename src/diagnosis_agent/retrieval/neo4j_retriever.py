@@ -86,23 +86,27 @@ class Neo4jFaultRetriever(FaultRetriever):
         dtc_codes: Optional[list[str]] = None,
         indicators: Optional[list[str]] = None,
         scenarios: Optional[list[str]] = None,
-        keyword: Optional[str] = None,
+        softwareVersion: Optional[str] = None,
+        motorPosition: Optional[str] = None,
+        VIN: Optional[str] = None,
         depth: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> list[FaultCandidate]:
-        """结构化召回 — 每个字段独立走自己的匹配通道
+        """结构化召回 — 所有字段独立走自己的匹配通道，不拼keyword
 
         Args:
-            vehicleModel: 车型代号 → 透传给 MotorType.code 模糊匹配
-            dtc_codes: DTC 列表 → DTC.code 精确 / DTC.description 模糊
+            vehicleModel: 车型代号 → MotorType.code 独立匹配
+            dtc_codes: DTC 列表 → DTC.code 独立匹配
             indicators: 仪表指示灯列表 → Indicator.name 独立匹配
-            scenarios: 故障工况列表 → Scenario 三级层级独立匹配
-            keyword: 补充关键词 → 匹配 Fault.description / full_text CONTAINS
+            scenarios: 故障工况列表 → Scenario 独立匹配
+            softwareVersion: 软件版本 → Fault.software_version 独立匹配
+            motorPosition: 电机位置 → Fault.motor_position 独立匹配
+            VIN: VIN码 → Fault.vin 独立匹配
             depth: 关系扩展深度，None 用默认
             limit: 返回上限，None 用默认
 
         Returns:
-            FaultCandidate 列表；Neo4j 不可用时返回空列表（不抛异常）。
+            FaultCandidate 列表；Neo4j 不可用时返回空列表（不抛异常），查不到跳过。
         """
         if not self.available:
             logger.info("Neo4j 召回不可用，返回空列表（上层走 Chroma 兜底）")
@@ -126,12 +130,19 @@ class Neo4jFaultRetriever(FaultRetriever):
                 if sc_clean and sc_clean != "无法确认故障工况":
                     valid_scenarios.append(sc_clean)
 
+        # 过滤掉"无法确认"类无意义电机位置
+        valid_motor_positions = []
+        if motorPosition and (motorPosition or "").strip() != "无法确认具体电机":
+            valid_motor_positions = [(motorPosition or "").strip()]
+
         condition = QueryCondition(
             motor_codes=motor_list,
             dtc_inputs=dtc_codes or None,
             indicators=valid_indicators if valid_indicators else None,
             scenarios=valid_scenarios if valid_scenarios else None,
-            keyword=keyword or None,
+            software_versions=[softwareVersion] if softwareVersion else None,
+            motor_positions=valid_motor_positions if valid_motor_positions else None,
+            vin=VIN if VIN else None,
             limit=limit or self._default_limit,
             depth=depth or self._default_depth,
         )
@@ -161,7 +172,9 @@ class Neo4jFaultRetriever(FaultRetriever):
         logger.info(
             f"Neo4j 召回: vehicleModel={vehicleModel}, "
             f"dtc={dtc_codes}, indicators={valid_indicators}, "
-            f"scenarios={valid_scenarios} → {len(candidates)} 条候选"
+            f"scenarios={valid_scenarios}, "
+            f"sw={softwareVersion}, pos={valid_motor_positions}, "
+            f"vin={VIN} → {len(candidates)} 条候选"
         )
         return candidates
 
@@ -178,7 +191,9 @@ class Neo4jFaultRetriever(FaultRetriever):
             dtc_codes=fields.get("dtcCode") or None,
             indicators=fields.get("instrumentIndicatorList") or None,
             scenarios=fields.get("faultWorkConditionList") or None,
-            keyword=fields.get("keyword") or None,
+            softwareVersion=fields.get("softwareVersion") or None,
+            motorPosition=fields.get("motorPosition") or None,
+            VIN=fields.get("VIN") or None,
             limit=top_k or self._default_limit,
         )
         return candidates

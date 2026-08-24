@@ -213,4 +213,11 @@ class SemanticReranker:
             if motorPosition in candidate.description:
                 hit += 1
 
+        # 7. VIN 匹配
+        VIN = fields.get("VIN")
+        if VIN:
+            total += 1
+            if VIN in candidate.description:
+                hit += 1
+
         return hit / total if total > 0 else 0.0

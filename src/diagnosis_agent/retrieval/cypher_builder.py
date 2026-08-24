@@ -29,12 +29,16 @@ class QueryCondition:
     """故障知识图谱查询条件
 
     所有字段都可选，None 表示不参与过滤。多个字段之间是 AND 关系。
+    每个字段默认走独立匹配通道，不拼入 keyword。
     """
     motor_codes: Optional[List[str]] = None
     vehicle_types: Optional[List[str]] = None
     indicators: Optional[List[str]] = None
     dtc_inputs: Optional[List[str]] = None
     scenarios: Optional[List[str]] = None
+    software_versions: Optional[List[str]] = None  # Fault.software_version CONTAINS
+    motor_positions: Optional[List[str]] = None    # Fault.motor_position CONTAINS
+    vin: Optional[str] = None                      # Fault.vin CONTAINS
     keyword: Optional[str] = None
     limit: int = 100
     depth: int = 1
@@ -140,6 +144,24 @@ class _QueryBuilder:
         if parts:
             self._where_clauses.append(f"({' OR '.join(parts)})")
 
+    def _build_software_version(self, values: List[str]) -> None:
+        parts = []
+        for v in values:
+            name = self._add_param(v)
+            parts.append(f"f.software_version CONTAINS ${name}")
+        self._where_clauses.append(f"({' OR '.join(parts)})")
+
+    def _build_motor_position(self, values: List[str]) -> None:
+        parts = []
+        for v in values:
+            name = self._add_param(v)
+            parts.append(f"f.motor_position CONTAINS ${name}")
+        self._where_clauses.append(f"({' OR '.join(parts)})")
+
+    def _build_vin(self, value: str) -> None:
+        name = self._add_param(value)
+        self._where_clauses.append(f"f.vin CONTAINS ${name}")
+
     def _build_keyword(self, keyword: str) -> None:
         kw = keyword.strip()
         if not kw:
@@ -169,6 +191,12 @@ class _QueryBuilder:
             self._build_dtc(condition.dtc_inputs)
         if condition.scenarios:
             self._build_scenario(condition.scenarios)
+        if condition.software_versions:
+            self._build_software_version(condition.software_versions)
+        if condition.motor_positions:
+            self._build_motor_position(condition.motor_positions)
+        if condition.vin:
+            self._build_vin(condition.vin)
         if condition.keyword:
             self._build_keyword(condition.keyword)
 
@@ -217,6 +245,12 @@ def build_count_query(condition: QueryCondition) -> Tuple[str, Dict[str, Any]]:
         qb._build_dtc(condition.dtc_inputs)
     if condition.scenarios:
         qb._build_scenario(condition.scenarios)
+    if condition.software_versions:
+        qb._build_software_version(condition.software_versions)
+    if condition.motor_positions:
+        qb._build_motor_position(condition.motor_positions)
+    if condition.vin:
+        qb._build_vin(condition.vin)
     if condition.keyword:
         qb._build_keyword(condition.keyword)
 

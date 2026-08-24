@@ -74,9 +74,17 @@ class ChromaVectorRetriever(BaseRetriever):
         vehicle_type: Optional[str] = None,
         drive_code: Optional[str] = None,
         dtc_code: Optional[str] = None,
+        dashboard_indicator: Optional[str] = None,
+        fault_scenario: Optional[str] = None,
+        software_version: Optional[str] = None,
+        motor_position: Optional[str] = None,
         top_k: int = 5,
     ) -> list[Document]:
-        """带过滤条件的语义检索"""
+        """带全字段独立过滤的语义检索
+
+        所有字段独立走 metadata 过滤通道，传了就用，不传就跳过。
+        一个字段查不到不会导致结果为空，Chroma 的 filter 本身就是非强约束的。
+        """
         k = top_k or self.top_k
 
         filters = {}
@@ -86,6 +94,14 @@ class ChromaVectorRetriever(BaseRetriever):
             filters["drive_code"] = drive_code
         if dtc_code:
             filters["dtc_code"] = dtc_code
+        if dashboard_indicator:
+            filters["dashboard_indicator"] = dashboard_indicator
+        if fault_scenario:
+            filters["fault_scenario"] = fault_scenario
+        if software_version:
+            filters["software_version"] = software_version
+        if motor_position:
+            filters["motor_position"] = motor_position
 
         try:
             results = self.store.search(

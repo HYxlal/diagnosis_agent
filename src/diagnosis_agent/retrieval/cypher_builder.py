@@ -200,8 +200,10 @@ class _QueryBuilder:
         if condition.keyword:
             self._build_keyword(condition.keyword)
 
+        # 所有条件之间用 OR 关系连接，不要 AND — 一个字段命中就算候选，
+        # 多个字段同时命中在精排阶段加权加分，不做强过滤让任何一个字段查不到就整体空
         where_clause = (
-            " AND ".join(self._where_clauses)
+            " OR ".join(f"({clause})" for clause in self._where_clauses)
             if self._where_clauses
             else "1=1"
         )

@@ -246,6 +246,11 @@ class HybridRetriever(FaultRetriever, BaseRetriever):
                 docs = self._chroma.search_with_filters(
                     query=query,  # 不拼接任何字段，纯原始查询
                     vehicle_type=filters.get("vehicle_type"),
+                    dtc_code=filters.get("dtc_code"),
+                    dashboard_indicator=filters.get("dashboard_indicator"),
+                    fault_scenario=filters.get("fault_scenario"),
+                    software_version=filters.get("software_version"),
+                    motor_position=filters.get("motor_position"),
                     top_k=top_k,
                 )
             else:

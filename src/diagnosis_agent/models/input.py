@@ -226,6 +226,11 @@ class ParsedInput(BaseModel):
         description="多轮对话历史",
     )
 
+    @property
+    def mcuid(self) -> str:
+        """兼容旧代码：mcuid 映射到 vehicleModel，用于检索条件"""
+        return self.vehicleModel
+
     def is_bulk(self) -> bool:
         """是否为批量输入"""
         return len(self.bulk_records) > 0

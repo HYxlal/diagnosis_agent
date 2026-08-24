@@ -164,27 +164,56 @@ class DiagnosisTask:
 # ========================================================================
 
 def to_standard_input(req: PlatformDiagnosisRequest):
-    """将平台请求转为内部 StandardInput
-
-    【占位 stub 本轮不实现，留到转换层重构时补全】
-    当前返回空对象，避免下游代码直接依赖导致 import 失败。
-    """
+    """将平台请求转为内部 StandardInput — 扁平化，字段 1:1 对应"""
     from ..models.input import StandardInput
-    raise NotImplementedError(
-        "to_standard_input 留到转换层重构阶段实现，请在转换层重做"
+
+    return StandardInput(
+        intentId=req.intentId,
+        query_confidence=req.query_confidence,
+        conversationId=req.conversationId,
+        context_history=req.context_history,
+        clientRequestId=req.clientRequestId,
+        traceId=req.traceId,
+        VIN=req.VIN,
+        raw_query=req.raw_query,
+        faultOccurTime=req.faultOccurTime,
+        mileage=req.mileage,
+        instrumentIndicatorList=req.instrumentIndicatorList,
+        vehicleModel=req.vehicleModel,
+        faultWorkConditionList=req.faultWorkConditionList,
+        dtcCode=req.dtcCode,
+        softwareVersion=req.softwareVersion,
+        motorPosition=req.motorPosition,
+        faultDataUrl=req.faultDataUrl,
     )
 
 
 def to_callback_result(
     task: DiagnosisTask,
     standard_output,
-):
-    """将内部 StandardOutput 转为平台回调格式
+) -> PlatformCallbackBody:
+    """将内部 StandardOutput 转为平台回调格式"""
+    result = standard_output.diagnosis_result
+    confidence = standard_output.diagnosis_confidence
 
-    【占位 stub 本轮不实现，留到转换层重构时补全】
-    """
-    raise NotImplementedError(
-        "to_callback_result 留到转换层重构阶段实现，请在转换层重做"
+    return PlatformCallbackBody(
+        requestId=task.requestId,
+        timestamp=datetime.now().isoformat(),
+        data=PlatformCallbackData(
+            clientRequestId=task.clientRequestId,
+            executionStatus=ExecutionStatus.SUCCESS.value,
+            diagnosisStatus=DiagnosisStatus.COMPLETED.value,
+            result=PlatformResult(
+                faultRootCause=result.fault_root_cause if result else [],
+                faultTriggerCondition=result.fault_trigger_condition if result else "",
+                classification=result.classification if result else "",
+                solution=result.solution if result else [],
+                riskWarning=result.risk_warning if result else "",
+                needMultiRound=standard_output.need_multi_round,
+                followUpQuestion=standard_output.follow_up_question,
+                diagnosisConfidence=confidence,
+            ),
+        ),
     )
 
 
@@ -192,11 +221,17 @@ def to_error_callback(
     task: DiagnosisTask,
     message: str,
     diagnosis_status: str = DiagnosisStatus.ERROR.value,
-):
-    """构建错误回调体
-
-    【占位 stub 本轮不实现，留到转换层重构时补全】
-    """
-    raise NotImplementedError(
-        "to_error_callback 留到转换层重构阶段实现，请在转换层重做"
+) -> PlatformCallbackBody:
+    """构建错误回调体 — code=1, success=False"""
+    return PlatformCallbackBody(
+        code=1,
+        message=message,
+        success=False,
+        requestId=task.requestId,
+        timestamp=datetime.now().isoformat(),
+        data=PlatformCallbackData(
+            clientRequestId=task.clientRequestId,
+            executionStatus=ExecutionStatus.FAILED.value,
+            diagnosisStatus=diagnosis_status,
+        ),
     )

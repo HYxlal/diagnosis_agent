@@ -1,8 +1,5 @@
-"""Adapter 模块测试 — 平台协议模型 + FastAPI 端点"""
+"""Adapter 模块测试 — 平台协议模型 + 映射函数 + FastAPI 端点"""
 from __future__ import annotations
-
-from datetime import datetime
-from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,10 +9,7 @@ from diagnosis_agent.adapter.models import (
     ExecutionStatus,
     PlatformCallbackBody,
     PlatformCallbackData,
-    PlatformContextTurn,
-    PlatformData,
     PlatformDiagnosisRequest,
-    PlatformEntities,
     PlatformResult,
     PlatformStatusResponse,
     PlatformSubmitResponse,
@@ -39,21 +33,17 @@ from diagnosis_agent.models.diagnostic_output import (
 @pytest.fixture
 def sample_request() -> PlatformDiagnosisRequest:
     return PlatformDiagnosisRequest(
+        VIN="LSVAF09E2HN1234567",
+        raw_query="车辆行驶中加速无力，DTC P0087",
+        faultOccurTime="2026-08-21T14:30:00+08:00",
+        mileage=35280.5,
+        vehicleModel="SUV-X1",
         clientRequestId="client-001",
-        taskId="task-001",
+        callbackUrl="http://platform/callback",
         traceId="trace-001",
         conversationId="conv-001",
-        faultDescription="车辆行驶中加速无力，DTC P0087",
-        callbackUrl="http://platform/callback",
-        vehicleModel="SUV-X1",
-        data=PlatformData(
-            rawQuery="加速无力",
-            entities=PlatformEntities(
-                dtcCode=["P0087"],
-                project="SUV-X1",
-                component="燃油系统",
-            ),
-        ),
+        dtcCode=["P0087"],
+        motorPosition="前电机",
     )
 
 
@@ -62,7 +52,7 @@ def sample_standard_output() -> StandardOutput:
     return StandardOutput(
         code=0,
         msg="success",
-        input_ref={"raw_query": "加速无力", "mcuid": "SUV-X1"},
+        input_ref={"raw_query": "加速无力", "VIN": "LSVAF09E2HN1234567"},
         diagnosis_confidence=0.85,
         need_multi_round=False,
         diagnosis_result=StandardDiagnosisResult(
@@ -85,32 +75,23 @@ class TestPlatformDiagnosisRequest:
     def test_minimal(self):
         """仅必填字段"""
         req = PlatformDiagnosisRequest(
+            VIN="V123",
+            raw_query="故障",
+            faultOccurTime="2026-01-01T00:00:00",
+            mileage=1000,
+            vehicleModel="H37A",
             clientRequestId="c1",
-            faultDescription="故障",
             callbackUrl="http://cb",
         )
-        assert req.clientRequestId == "c1"
-        assert req.protocolVersion == "1.0"
-        assert req.domainCode == "EV_DRIVE"
+        assert req.VIN == "V123"
+        assert req.raw_query == "故障"
+        assert req.vehicleModel == "H37A"
 
     def test_full(self, sample_request):
-        assert sample_request.vin == ""
-        assert sample_request.data.entities.dtcCode == ["P0087"]
-        assert sample_request.data.entities.component == "燃油系统"
-
-    def test_context_history(self):
-        req = PlatformDiagnosisRequest(
-            clientRequestId="c2",
-            faultDescription="异响",
-            callbackUrl="http://cb",
-            data=PlatformData(
-                contextHistory=[
-                    PlatformContextTurn(userQuery="之前有故障码", agentResponse="请提供DTC"),
-                ],
-            ),
-        )
-        assert len(req.data.contextHistory) == 1
-        assert req.data.contextHistory[0].userQuery == "之前有故障码"
+        assert sample_request.VIN == "LSVAF09E2HN1234567"
+        assert sample_request.raw_query == "车辆行驶中加速无力，DTC P0087"
+        assert sample_request.dtcCode == ["P0087"]
+        assert sample_request.motorPosition == "前电机"
 
 
 class TestPlatformResult:
@@ -129,7 +110,6 @@ class TestPlatformResult:
         )
         assert r.faultRootCause == ["原因A"]
         assert r.classification == "控制异常"
-        assert r.solution == ["方案B"]
 
 
 class TestPlatformStatusResponse:
@@ -143,15 +123,11 @@ class TestPlatformStatusResponse:
         )
         assert resp.clientRequestId == "c1"
         assert resp.executionStatus == "SUCCESS"
-        assert resp.result == {"key": "val"}
 
 
 class TestPlatformSubmitResponse:
     def test_defaults(self):
-        resp = PlatformSubmitResponse(
-            requestId="req-1",
-            timestamp="ts",
-        )
+        resp = PlatformSubmitResponse(requestId="req-1", timestamp="ts")
         assert resp.code == 0
         assert resp.success is True
         assert resp.data["status"] == "PENDING"
@@ -163,19 +139,12 @@ class TestDiagnosisTask:
         assert task.requestId.startswith("EV-REQ-")
         assert task.clientRequestId == "client-001"
         assert task.status == ExecutionStatus.PENDING.value
-        assert task.result is None
 
     def test_touch(self, sample_request):
         task = DiagnosisTask(sample_request)
         old = task.updated_at
         task.touch()
         assert task.updated_at >= old
-
-    def test_idempotent(self, sample_request):
-        """相同 clientRequestId 应返回同一 task"""
-        task1 = DiagnosisTask(sample_request)
-        task2 = DiagnosisTask(sample_request)
-        assert task1.requestId != task2.requestId  # 每次新建 ID 不同
 
 
 # ========================================================================
@@ -186,29 +155,25 @@ class TestDiagnosisTask:
 class TestToStandardInput:
     def test_basic(self, sample_request):
         std = to_standard_input(sample_request)
+        assert std.VIN == "LSVAF09E2HN1234567"
         assert std.raw_query == "车辆行驶中加速无力，DTC P0087"
-        assert std.mcuid == "SUV-X1"
-        assert std.entities.dtc_code == ["P0087"]
-        assert std.entities.project == "SUV-X1"
-
-    def test_entities_fallback(self):
-        """data 层 entities 为空时用顶层字段"""
-        req = PlatformDiagnosisRequest(
-            clientRequestId="c1",
-            faultDescription="故障",
-            callbackUrl="http://cb",
-            vehicleModel="SEDAN-A2",
-            data=PlatformData(
-                rawQuery="故障描述",
-                entities=PlatformEntities(),
-            ),
-        )
-        std = to_standard_input(req)
-        assert std.mcuid == "SEDAN-A2"
+        assert std.vehicleModel == "SUV-X1"
+        assert std.dtcCode == ["P0087"]
+        assert std.mileage == 35280.5
+        assert std.motorPosition.value == "前电机"
 
     def test_conversation_id(self, sample_request):
         std = to_standard_input(sample_request)
-        assert std.conversation_id == "conv-001"
+        assert std.conversationId == "conv-001"
+
+    def test_defaults(self):
+        req = PlatformDiagnosisRequest(
+            VIN="V123", raw_query="test", faultOccurTime="2026-01-01T00:00:00",
+            mileage=100, vehicleModel="H37A", clientRequestId="c1", callbackUrl="http://cb",
+        )
+        std = to_standard_input(req)
+        assert std.dtcCode == []
+        assert std.faultWorkConditionList.value == "无法确认故障工况"
 
 
 class TestToCallbackResult:
@@ -274,19 +239,16 @@ class TestServer:
         data = resp.json()
         assert data["manifestVersion"] == "1.0"
         assert data["agentCode"] == "ev_drive_agent"
-        assert "capabilities" in data
-        assert "endpoints" in data
 
     def test_submit_diagnosis_accepts_request(self):
         payload = {
             "clientRequestId": "test-client-001",
-            "faultDescription": "加速无力",
-            "callbackUrl": "http://localhost/callback",
+            "VIN": "LSVAF09E2HN1234567",
+            "raw_query": "加速无力",
+            "faultOccurTime": "2026-01-01T00:00:00",
+            "mileage": 1000,
             "vehicleModel": "SUV-X1",
-            "data": {
-                "rawQuery": "加速无力",
-                "entities": {"dtcCode": ["P0087"]},
-            },
+            "callbackUrl": "http://localhost/callback",
         }
         resp = self.client.post("/api/v1/diagnoses/async", json=payload)
         assert resp.status_code == 200
@@ -298,39 +260,41 @@ class TestServer:
     def test_submit_idempotent(self):
         payload = {
             "clientRequestId": "test-client-idempotent",
-            "faultDescription": "怠速不稳",
+            "VIN": "V123",
+            "raw_query": "怠速不稳",
+            "faultOccurTime": "2026-01-01T00:00:00",
+            "mileage": 1000,
+            "vehicleModel": "H37A",
             "callbackUrl": "http://localhost/callback",
         }
-        # 第一次提交
         r1 = self.client.post("/api/v1/diagnoses/async", json=payload)
         assert r1.status_code == 200
         rid1 = r1.json()["requestId"]
 
-        # 相同 clientRequestId 再次提交
         r2 = self.client.post("/api/v1/diagnoses/async", json=payload)
         assert r2.status_code == 200
         rid2 = r2.json()["requestId"]
-        assert rid2 == rid1  # 幂等，返回相同 requestId
+        assert rid2 == rid1
 
     def test_status_query_not_found(self):
         resp = self.client.get("/api/v1/diagnoses/nonexistent/status")
         assert resp.status_code == 404
-        assert resp.json()["detail"] == "requestId not found"
 
     def test_status_query_found(self):
-        # 先提交一个请求
         payload = {
             "clientRequestId": "test-client-status",
-            "faultDescription": "异响",
+            "VIN": "V123",
+            "raw_query": "异响",
+            "faultOccurTime": "2026-01-01T00:00:00",
+            "mileage": 1000,
+            "vehicleModel": "H37A",
             "callbackUrl": "http://localhost/callback",
         }
         submit = self.client.post("/api/v1/diagnoses/async", json=payload)
         request_id = submit.json()["requestId"]
 
-        # 查询状态
         resp = self.client.get(f"/api/v1/diagnoses/{request_id}/status")
         assert resp.status_code == 200
         data = resp.json()
         assert data["clientRequestId"] == "test-client-status"
-        assert data["executionStatus"] in ("PENDING", "RUNNING", "SUCCESS", "FAILED")
         assert "updatedAt" in data

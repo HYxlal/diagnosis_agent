@@ -403,7 +403,7 @@ def _run_standard_diagnosis(
 
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
-        json_output_path = output_path / f"diagnosis_output_{standard_input.mcuid}.json"
+        json_output_path = output_path / f"diagnosis_output_{standard_input.vehicleModel}.json"
         with open(json_output_path, "w", encoding="utf-8") as f:
             f.write(json.dumps(standard_output.model_dump(), ensure_ascii=False, indent=2))
         console.print(f"\n  💾 已保存到: {json_output_path}")

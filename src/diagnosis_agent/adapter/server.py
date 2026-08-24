@@ -56,7 +56,7 @@ async def submit_diagnosis(req: PlatformDiagnosisRequest):
 
     # 创建任务
     task = task_manager.create_task(req)
-    logger.info(f"[{task.requestId}] 受理诊断: {req.faultDescription[:60]}...")
+    logger.info(f"[{task.requestId}] 受理诊断: {req.raw_query[:60]}...")
 
     # 后台异步执行
     asyncio.create_task(execute_diagnosis(task, req))

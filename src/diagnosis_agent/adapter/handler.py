@@ -64,20 +64,18 @@ async def execute_diagnosis(task: DiagnosisTask, req: PlatformDiagnosisRequest):
         task.status = ExecutionStatus.RUNNING.value
         task.touch()
 
-        logger.info(f"[{task.requestId}] 开始诊断: {req.faultDescription[:60]}...")
+        logger.info(f"[{task.requestId}] 开始诊断: {req.raw_query[:60]}...")
 
         # 1. 构建 StandardInput
         std_input = to_standard_input(req)
 
         # 2. 获取历史消息
-        history = build_history_messages(req.conversationId, req.data.contextHistory)
+        history = build_history_messages(req.conversationId, req.context_history)
 
         # 3. 预处理 CAN 文件（如有）
         prepared = None
-        if req.data.canFileUrl:
-            can_summary = await preprocess_can_file(
-                req.data.canFileUrl, req.data.canDbcFileUrl,
-            )
+        if req.faultDataUrl:
+            can_summary = await preprocess_can_file(req.faultDataUrl)
             if can_summary:
                 from langchain_core.messages import SystemMessage
                 prepared = [SystemMessage(content=can_summary)]
@@ -155,12 +153,12 @@ async def _extract_knowledge_async(
         from ..knowledge.extractor import ConversationKnowledgeExtractor
 
         messages = []
-        for turn in req.data.contextHistory or []:
-            if turn.userQuery:
-                messages.append({"role": "user", "content": turn.userQuery})
-            if turn.agentResponse:
-                messages.append({"role": "assistant", "content": turn.agentResponse})
-        messages.append({"role": "user", "content": req.faultDescription or req.data.rawQuery})
+        for turn in req.context_history or []:
+            if turn.get("query"):
+                messages.append({"role": "user", "content": turn["query"]})
+            if turn.get("agent_answer"):
+                messages.append({"role": "assistant", "content": turn["agent_answer"]})
+        messages.append({"role": "user", "content": req.raw_query})
         if output and output.diagnosis_result:
             result_text = json.dumps(output.diagnosis_result.model_dump(), ensure_ascii=False)
             messages.append({"role": "assistant", "content": result_text})
@@ -173,14 +171,23 @@ async def _extract_knowledge_async(
         logger.warning(f"知识提取失败: {e}")
 
 
-async def preprocess_can_file(can_url: str, dbc_url: str) -> str | None:
-    """下载 CAN 文件 → 解码 → 提取信号摘要 → 返回 Agent 可读文本"""
+async def preprocess_can_file(fault_data_url: str) -> str | None:
+    """下载 CAN 文件 → 解码 → 提取信号摘要 → 返回 Agent 可读文本
+
+    fault_data_url 为逗号分隔的多文件链接，首个为 CAN 日志，第二个为 DBC 文件(可选)。
+    """
     import pandas as pd
+
+    urls = [u.strip() for u in fault_data_url.split(",") if u.strip()]
+    if not urls:
+        return None
 
     tmp_dir = Path("data/can_downloads")
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     try:
+        can_url = urls[0]
+        dbc_url = urls[1] if len(urls) > 1 else None
         can_path, dbc_path = None, None
         async with httpx.AsyncClient(timeout=300) as client:
             can_resp = await client.get(can_url)

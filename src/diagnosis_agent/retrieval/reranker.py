@@ -7,6 +7,7 @@
 - embedding_fn 复用 ChromaVectorStore 的 embedding function，保证语义空间一致
 - 带 LRU 缓存（description hash → 向量），避免重复算
 - embedding 不可用时降级到只按 structural_match_ratio 排序，不阻断流程
+- 结构化字段名与输入层完全对齐：vehicleModel, dtcCode, faultWorkConditionList, instrumentIndicatorList
 """
 
 from __future__ import annotations
@@ -96,7 +97,7 @@ class SemanticReranker:
             return 0.0
         dot = sum(x * y for x, y in zip(a, b))
         norm_a = math.sqrt(sum(x * x for x in a))
-        norm_b = math.sqrt(sum(y * y for y in b))
+        norm_b = math.sqrt(sum(x * x for x in b))
         if norm_a == 0 or norm_b == 0:
             return 0.0
         return dot / (norm_a * norm_b)
@@ -114,8 +115,9 @@ class SemanticReranker:
             query: 用户原始查询文本（raw_query）
             candidates: 召回层返回的候选
             top_k: 返回数量
-            structural_fields: 输入中结构化字段，用于算 structural_match_ratio。
-                key 可选: mcuid, dtc_code, project, component, working_condition, software_version
+            structural_fields: 输入中结构化字段，字段名与输入层对齐：
+                vehicleModel, dtcCode, faultWorkConditionList, instrumentIndicatorList,
+                softwareVersion, motorPosition
                 命中的字段越多，ratio 越高
 
         Returns:
@@ -156,7 +158,7 @@ class SemanticReranker:
     ) -> float:
         """计算候选对输入结构化字段的命中率
 
-        遍历输入提供的每个结构化字段，判断候选是否命中，命中数 / 总字段数。
+        字段名与输入层完全对齐，遍历每个字段判断是否命中，命中数 / 总字段数。
         """
         if not fields:
             return 0.0
@@ -164,43 +166,51 @@ class SemanticReranker:
         total = 0
         hit = 0
 
-        mcuid = fields.get("mcuid")
-        if mcuid:
+        # 1. vehicleModel 匹配
+        vehicleModel = fields.get("vehicleModel")
+        if vehicleModel:
             total += 1
-            if mcuid and (mcuid in candidate.motor_code or mcuid in candidate.description):
+            if vehicleModel and (vehicleModel in candidate.motor_code or vehicleModel in candidate.description):
                 hit += 1
 
-        dtc_code = fields.get("dtc_code")
-        if dtc_code:
+        # 2. dtcCode 匹配（支持多DTC列表，任意一个命中就算命中）
+        dtcCode = fields.get("dtcCode")
+        if dtcCode:
             total += 1
-            if isinstance(dtc_code, list):
-                if any(d in candidate.dtc_codes for d in dtc_code):
+            if isinstance(dtcCode, list):
+                if any(d in candidate.dtc_codes for d in dtcCode):
                     hit += 1
-            elif isinstance(dtc_code, str) and dtc_code in candidate.dtc_codes:
+            elif isinstance(dtcCode, str) and dtcCode in candidate.dtc_codes:
                 hit += 1
 
-        project = fields.get("project")
-        if project:
+        # 3. faultWorkConditionList 故障工况匹配
+        scenario = fields.get("faultWorkConditionList")
+        if scenario:
             total += 1
-            if project in candidate.vehicle_type or project in candidate.description:
+            if scenario in candidate.scenario or scenario in candidate.description:
                 hit += 1
 
-        component = fields.get("component")
-        if component:
+        # 4. instrumentIndicatorList 仪表指示灯匹配
+        indicators = fields.get("instrumentIndicatorList")
+        if indicators:
             total += 1
-            if component in candidate.description:
+            if isinstance(indicators, list):
+                # 至少有一个指示灯在候选的 indicators 列表中出现
+                if any(ind in candidate.indicators for ind in indicators):
+                    hit += 1
+
+        # 5. softwareVersion 匹配
+        softwareVersion = fields.get("softwareVersion")
+        if softwareVersion:
+            total += 1
+            if softwareVersion in candidate.description:
                 hit += 1
 
-        working_condition = fields.get("working_condition")
-        if working_condition:
+        # 6. motorPosition 电机位置匹配
+        motorPosition = fields.get("motorPosition")
+        if motorPosition:
             total += 1
-            if working_condition in candidate.scenario or working_condition in candidate.description:
-                hit += 1
-
-        software_version = fields.get("software_version")
-        if software_version:
-            total += 1
-            if software_version in candidate.description:
+            if motorPosition in candidate.description:
                 hit += 1
 
         return hit / total if total > 0 else 0.0

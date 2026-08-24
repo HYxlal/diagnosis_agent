@@ -8,23 +8,20 @@
 对外只暴露 retrieve()，上层不感知走了哪条路。
 返回统一 list[Document]，metadata 带 source 标签（"neo4j" / "chroma"）。
 
-字段映射从 FieldMapper 取，不再在编排层散写映射。
-Cypher 构建由本模块自己实现，不依赖 fault_knowledge_graph 项目。
-
-当前字段重构（经验探索版）：
-- 搜索条件直接对齐 StandardInput.entities：
-  mcuid / dtc_code / project / component / working_condition / software_version
-- 不映射到 IncidentRecord 的 8 列表头，也不映射到 Neo4j 节点属性名。
-- Neo4j schema 尚未重构，因此把新字段作为 keyword 模糊匹配传入，
-  同时保留 dtc_code 的旧路径召回；等 Neo4j schema 对齐后再精确过滤。
+字段分通道匹配设计：
+每个字段独立走自己的匹配路径，不强制拼进 keyword：
+  - vehicleModel          → Neo4j motor_codes 独立匹配 / Chroma metadata vehicle_type 独立过滤
+  - dtcCode               → Neo4j dtc_inputs 独立匹配 / Chroma metadata dtc_code 独立过滤
+  - faultWorkConditionList → Neo4j scenarios 独立匹配 / Chroma metadata fault_scenario 独立过滤
+  - instrumentIndicatorList → Neo4j indicators 独立匹配 / Chroma metadata dashboard_indicator 独立过滤
+  - softwareVersion/motorPosition/VIN → keyword 补充通道
+空字段自动跳过，不做强过滤。
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Optional
-
-from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
@@ -42,13 +39,10 @@ logger = logging.getLogger(__name__)
 
 
 class HybridRetriever(FaultRetriever, BaseRetriever):
-    """两段式混合检索器
+    """两段式混合检索器 — 字段分通道独立匹配
 
     同时继承 FaultRetriever（内部接口）和 BaseRetriever（LangChain 标准接口）。
     Neo4j 召回 → Embedding 精排 → Chroma 兜底（按 strategy 配置）。
-
-    - retrieve_parsed()：两段式检索入口（Agent 内部使用，需要 ParsedInput）
-    - _get_relevant_documents()：BaseRetriever 接口，纯语义检索
     """
 
     def __init__(
@@ -93,6 +87,7 @@ class HybridRetriever(FaultRetriever, BaseRetriever):
         self,
         query: str,
         vehicle_type: Optional[str] = None,
+        drive_code: Optional[str] = None,
         top_k: int = 5,
     ) -> list[Document]:
         """纯语义检索（供 Agent 工具在循环中主动调用）
@@ -104,6 +99,7 @@ class HybridRetriever(FaultRetriever, BaseRetriever):
                 docs = self._chroma.search_with_filters(
                     query=query,
                     vehicle_type=vehicle_type,
+                    drive_code=drive_code,
                     top_k=top_k,
                 )
             else:
@@ -137,7 +133,7 @@ class HybridRetriever(FaultRetriever, BaseRetriever):
     def retrieve_parsed(self, parsed_input: ParsedInput) -> list[Document]:
         """按 ParsedInput 执行两段式检索（编排入口）
 
-        Agent 内部走这个方法，会用到 strategy 配置和字段映射。
+        Agent 内部走这个方法，会用到 strategy 配置和字段分通道独立匹配。
         """
         query = parsed_input.search_query or parsed_input.description or ""
         if not query:
@@ -187,30 +183,30 @@ class HybridRetriever(FaultRetriever, BaseRetriever):
         return ranked[:top_k]
 
     # ------------------------------------------------------------------
-    # Stage 1: Neo4j 召回
+    # Stage 1: Neo4j 召回 — 各字段独立走自己的匹配通道
     # ------------------------------------------------------------------
 
     def _neo4j_recall(self, condition: SearchCondition) -> list:
-        """调用 Neo4j 召回
-
-        当前 Neo4j schema 尚未按新字段重构，因此：
-        - dtc_code 仍走旧的 HAS_DTC 路径
-        - 其余字段（mcuid/project/component/working_condition/software_version）
-          统一作为 keyword 在 Fault.description / full_text 中模糊匹配
-        """
+        """调用 Neo4j 结构化召回 — 字段分通道独立匹配，不强拼keyword"""
         if not self._neo4j.available:
             return []
 
-        keyword = condition.to_keyword()
+        # 工况独立通道（转成字符串列表，多个工况场景独立匹配）
+        scenarios = []
+        if condition.faultWorkConditionList and condition.faultWorkConditionList != "无法确认故障工况":
+            scenarios = [condition.faultWorkConditionList]
 
+        # 走各字段独立通道
         return self._neo4j.structured_recall(
-            mcuid=condition.mcuid,
-            dtc_codes=condition.dtc_code or None,
-            keyword=keyword or None,
+            vehicleModel=condition.vehicleModel if condition.vehicleModel else None,
+            dtc_codes=condition.dtcCode if condition.dtcCode else None,
+            indicators=condition.instrumentIndicatorList if condition.instrumentIndicatorList else None,
+            scenarios=scenarios if scenarios else None,
+            keyword=condition.to_keyword() or None,
         )
 
     # ------------------------------------------------------------------
-    # Stage 3: Chroma 兜底
+    # Stage 3: Chroma 兜底 — metadata 独立字段过滤
     # ------------------------------------------------------------------
 
     def _chroma_fallback(
@@ -219,18 +215,27 @@ class HybridRetriever(FaultRetriever, BaseRetriever):
         top_k: int,
         condition: SearchCondition,
     ) -> list[Document]:
-        """Chroma 语义检索兜底
+        """Chroma 语义检索兜底 — 各字段走独立 metadata 过滤通道，不强拼到文本"""
+        # 构建独立 metadata 过滤条件
+        filters = {}
+        if condition.vehicleModel:
+            filters["vehicle_type"] = condition.vehicleModel
+        if condition.dtcCode and len(condition.dtcCode) > 0:
+            # Chroma metadata 里 dtc_code 是字符串，有DTC码的直接精确匹配
+            filters["dtc_code"] = condition.dtcCode[0]
 
-        把结构化字段拼入 query，提升语义匹配相关性。
-        当前不使用 mcuid 做 metadata 过滤（Chroma metadata 还未加入 mcuid）。
-        """
-        enriched_query = self._build_chroma_query(query, condition)
+        # 查询增强文本：仅补充没有独立metadata通道的字段
+        enriched_query_parts = [query]
+        kw = condition.to_keyword()
+        if kw:
+            enriched_query_parts.append(kw)
+        enriched_query = " ".join(enriched_query_parts)
 
         try:
             if hasattr(self._chroma, "search_with_filters"):
                 docs = self._chroma.search_with_filters(
                     query=enriched_query,
-                    drive_code=None,
+                    vehicle_type=filters.get("vehicle_type"),
                     top_k=top_k,
                 )
             else:
@@ -242,24 +247,6 @@ class HybridRetriever(FaultRetriever, BaseRetriever):
         for doc in docs:
             doc.metadata["source"] = "chroma"
         return docs
-
-    @staticmethod
-    def _build_chroma_query(query: str, condition: SearchCondition) -> str:
-        """把搜索条件拼入 Chroma 查询文本"""
-        parts = [query]
-        if condition.mcuid:
-            parts.append(condition.mcuid)
-        if condition.dtc_code:
-            parts.extend(condition.dtc_code)
-        if condition.project:
-            parts.append(condition.project)
-        if condition.component:
-            parts.append(condition.component)
-        if condition.working_condition:
-            parts.append(condition.working_condition)
-        if condition.software_version:
-            parts.append(condition.software_version)
-        return " ".join(parts)
 
     # ------------------------------------------------------------------
     # 工具方法

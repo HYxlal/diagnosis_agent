@@ -25,7 +25,7 @@ from diagnosis_agent.agent.langchain_agent import LangChainDiagnosticAgent
 from diagnosis_agent.agent.context_manager import AsyncContextManager
 from diagnosis_agent.agent.context.summarizer import Summarizer
 from diagnosis_agent.agent.context.topic_detector import TopicDetector
-from diagnosis_agent.models.input import StandardInput, StandardEntities
+from diagnosis_agent.models.input import StandardInput
 
 
 def print_section(title: str):
@@ -105,12 +105,14 @@ async def main():
         ctx = sm.get_conversation_context(conversation_id)
         prepared = await context_manager.prepare_messages_async(ctx, query)
 
-        # 构建标准输入
+        # 构建标准输入 — 使用新的扁平化字段
         standard_input = StandardInput(
             raw_query=query,
-            mcuid="MCU_002",
-            conversation_id=conversation_id,
-            entities=StandardEntities(),
+            VIN="LSVAF09E2HN1234567",
+            vehicleModel="H37A",
+            faultOccurTime="2026-08-21T14:30:00+08:00",
+            mileage=35280.5,
+            conversationId=conversation_id,
         )
 
         start = time.perf_counter()
@@ -192,9 +194,11 @@ async def main():
 
     standard_input = StandardInput(
         raw_query="回顾一下之前的诊断结论",
-        mcuid="MCU_002",
-        conversation_id=conversation_id,
-        entities=StandardEntities(),
+        VIN="LSVAF09E2HN1234567",
+        vehicleModel="H37A",
+        faultOccurTime="2026-08-21T14:30:00+08:00",
+        mileage=35280.5,
+        conversationId=conversation_id,
     )
 
     try:
@@ -250,9 +254,11 @@ async def main():
 
         standard_input = StandardInput(
             raw_query=f"电机故障诊断问题_{i}",
-            mcuid="MCU_003",
-            conversation_id=conversation_id2,
-            entities=StandardEntities(),
+            VIN="LSVAF09E2HN1234567",
+            vehicleModel="H37A",
+            faultOccurTime="2026-08-21T14:30:00+08:00",
+            mileage=35280.5,
+            conversationId=conversation_id2,
         )
 
         start = time.perf_counter()

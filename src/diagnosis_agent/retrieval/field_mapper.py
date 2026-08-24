@@ -1,10 +1,7 @@
 """字段映射层
 
-把 ParsedInput 中的 entities 字段原样透传到 SearchCondition，
-不再映射到 IncidentRecord 的 8 列表头，也不映射到 Neo4j 节点属性。
-
-当前目标：搜索条件与输入 JSON 的字段结构保持一致，
-让检索层直接消费 dtc_code / project / component / working_condition / software_version。
+ParsedInput → SearchCondition 100% 透传，零字段翻译逻辑。
+直接从 ParsedInput 扁平化字段取值，不经过任何 entities 中间对象。
 """
 
 from __future__ import annotations
@@ -14,33 +11,29 @@ from .search_condition import SearchCondition
 
 
 class FieldMapper:
-    """ParsedInput → SearchCondition
+    """字段提取器 — 纯透传，零映射
 
-    只做字段透传，不做字段翻译。
-    等后续 Neo4j / Chroma schema 重构完成后再精确映射。
+    没有任何字段名翻译，所有字段直接从 ParsedInput 赋值到 SearchCondition，
+    字段名完全对齐，路径一目了然。
     """
 
     @classmethod
     def extract_search_condition(cls, parsed_input: ParsedInput) -> SearchCondition:
-        """从 ParsedInput 提取搜索条件
+        """从 ParsedInput 直接提取搜索条件，纯透传零逻辑
 
-        优先用 entities 里的字段；entities 为空时只保留 mcuid / raw_query。
+        所有字段直接赋值，不做转换、不做翻译、不做过滤。
+        空值由 SearchCondition 侧按需跳过。
         """
         raw_query = parsed_input.search_query or parsed_input.description or ""
 
-        cond = SearchCondition(
+        return SearchCondition(
             raw_query=raw_query,
-            mcuid=parsed_input.mcuid or None,
+            vehicleModel=parsed_input.vehicleModel or None,
+            dtcCode=list(parsed_input.dtcCode or []),
+            softwareVersion=parsed_input.softwareVersion or None,
+            motorPosition=parsed_input.motorPosition.value,
+            faultWorkConditionList=parsed_input.faultWorkConditionList.value,
+            instrumentIndicatorList=[item.value for item in parsed_input.instrumentIndicatorList],
+            VIN=parsed_input.VIN or None,
+            mileage=parsed_input.mileage,
         )
-
-        entities = parsed_input.entities
-        if entities is None:
-            return cond
-
-        cond.dtc_code = list(entities.dtc_code or [])
-        cond.project = entities.project or None
-        cond.component = entities.component or None
-        cond.working_condition = entities.working_condition or None
-        cond.software_version = entities.software_version or None
-
-        return cond

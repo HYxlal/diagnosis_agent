@@ -1,19 +1,17 @@
 """Neo4j 故障知识图谱召回层
 
-用本项目自实现的 cypher_builder（retrieval/cypher_builder.py）生成 Cypher，
-自己建 Neo4j 驱动连接，不再依赖 fault_knowledge_graph 项目。
-
 职责：
-- 输入结构化字段（mcuid/DTC/keyword/...）
+- 输入结构化字段，每个字段独立走自己的匹配通道
 - 调用 cypher_builder.build_query 生成 Cypher
 - 执行查询，把原始记录展平为 FaultCandidate
 - 连接失败时 catch 住，返回空列表（上层走 Chroma 兜底）
 
-当前阶段：
-- 外部字段已对齐 StandardInput.entities：dtc_code, project, component, working_condition, software_version。
-- Neo4j schema 已重构为中文语义关系（出现于/关联DTC/亮起/发生于/配备 等）。
-- 当前映射：mcuid → motor_codes，dtc_code → dtc_inputs，其余字段统一作为 keyword。
-- 待优化：project/component/working_condition/software_version 映射到对应节点属性。
+每个字段的独立匹配通道：
+- motor_codes    → MotorType.code CONTAINS（车型精确匹配）
+- dtc_inputs     → DTC.code 精确 / DTC.description 模糊（DTC独立通道）
+- indicators     → Indicator.name CONTAINS（仪表指示灯独立通道）
+- scenarios      → Scenario 三级结构独立匹配（故障工况独立通道）
+- keyword        → Fault.description / full_text CONTAINS（补充通道，空字段不进入）
 
 不在这里做的事：
 - 不做 embedding 精排（在 reranker.py）
@@ -38,7 +36,7 @@ logger = logging.getLogger(__name__)
 class Neo4jFaultRetriever(FaultRetriever):
     """Neo4j 结构化召回器
 
-    用 cypher_builder.build_query(QueryCondition) 生成 Cypher，自己建驱动执行。
+    各字段独立走各自的关系匹配路径，不统一拼keyword。
     """
 
     def __init__(
@@ -84,18 +82,22 @@ class Neo4jFaultRetriever(FaultRetriever):
 
     def structured_recall(
         self,
-        mcuid: Optional[str] = None,
+        vehicleModel: Optional[str] = None,
         dtc_codes: Optional[list[str]] = None,
+        indicators: Optional[list[str]] = None,
+        scenarios: Optional[list[str]] = None,
         keyword: Optional[str] = None,
         depth: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> list[FaultCandidate]:
-        """结构化召回
+        """结构化召回 — 每个字段独立走自己的匹配通道
 
         Args:
-            mcuid: MCU 标识 → 透传给 MotorType.code 模糊匹配
+            vehicleModel: 车型代号 → 透传给 MotorType.code 模糊匹配
             dtc_codes: DTC 列表 → DTC.code 精确 / DTC.description 模糊
-            keyword: 关键词 → 匹配 Fault.description / full_text
+            indicators: 仪表指示灯列表 → Indicator.name 独立匹配
+            scenarios: 故障工况列表 → Scenario 三级层级独立匹配
+            keyword: 补充关键词 → 匹配 Fault.description / full_text CONTAINS
             depth: 关系扩展深度，None 用默认
             limit: 返回上限，None 用默认
 
@@ -106,12 +108,30 @@ class Neo4jFaultRetriever(FaultRetriever):
             logger.info("Neo4j 召回不可用，返回空列表（上层走 Chroma 兜底）")
             return []
 
-        motor_list = [mcuid] if mcuid else None
+        motor_list = [vehicleModel] if vehicleModel else None
+
+        # 过滤掉"无"、空字符串这类无意义指标
+        valid_indicators = []
+        if indicators:
+            for ind in indicators:
+                ind_clean = (ind or "").strip()
+                if ind_clean and ind_clean != "无":
+                    valid_indicators.append(ind_clean)
+
+        # 过滤掉"无法确认"类无意义工况
+        valid_scenarios = []
+        if scenarios:
+            for sc in scenarios:
+                sc_clean = (sc or "").strip()
+                if sc_clean and sc_clean != "无法确认故障工况":
+                    valid_scenarios.append(sc_clean)
 
         condition = QueryCondition(
             motor_codes=motor_list,
-            dtc_inputs=dtc_codes,
-            keyword=keyword,
+            dtc_inputs=dtc_codes or None,
+            indicators=valid_indicators if valid_indicators else None,
+            scenarios=valid_scenarios if valid_scenarios else None,
+            keyword=keyword or None,
             limit=limit or self._default_limit,
             depth=depth or self._default_depth,
         )
@@ -139,8 +159,9 @@ class Neo4jFaultRetriever(FaultRetriever):
                 logger.warning(f"展平 Neo4j 记录失败: {e}, record={record}")
                 continue
         logger.info(
-            f"Neo4j 召回: mcuid={mcuid}, dtc={dtc_codes}, "
-            f"keyword={keyword} → {len(candidates)} 条候选"
+            f"Neo4j 召回: vehicleModel={vehicleModel}, "
+            f"dtc={dtc_codes}, indicators={valid_indicators}, "
+            f"scenarios={valid_scenarios} → {len(candidates)} 条候选"
         )
         return candidates
 
@@ -150,15 +171,13 @@ class Neo4jFaultRetriever(FaultRetriever):
         fields: Optional[dict[str, Any]] = None,
         top_k: int = 5,
     ) -> list:
-        """FaultRetriever 接口实现：把结构化字段转成 structured_recall 调用
-
-        本类不做 embedding 精排，返回 FaultCandidate 原始对象（由 HybridRetriever
-        在编排层负责转 Document + 精排）。
-        """
+        """FaultRetriever 接口实现：把结构化字段转成 structured_recall 调用"""
         fields = fields or {}
         candidates = self.structured_recall(
-            mcuid=fields.get("mcuid") or None,
-            dtc_codes=fields.get("dtc_code") or None,
+            vehicleModel=fields.get("vehicleModel") or None,
+            dtc_codes=fields.get("dtcCode") or None,
+            indicators=fields.get("instrumentIndicatorList") or None,
+            scenarios=fields.get("faultWorkConditionList") or None,
             keyword=fields.get("keyword") or None,
             limit=top_k or self._default_limit,
         )

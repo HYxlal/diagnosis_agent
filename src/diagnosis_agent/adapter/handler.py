@@ -212,27 +212,43 @@ async def preprocess_can_file(fault_data_url: str) -> str | None:
 
         capture = result.get("capture", {})
         output_files = result.get("output_files", [])
-        csv_file = next((f for f in output_files if f.endswith(".csv")), None)
-        signals = []
-        summary_signals = ""
-        if csv_file:
-            df = pd.read_csv(csv_file)
-            numeric_cols = df.select_dtypes(include="number").columns
-            signals = list(numeric_cols)
-            ranges = []
-            for col in list(numeric_cols)[:15]:
-                ranges.append(f"  {col}: {df[col].min():.1f} → {df[col].max():.1f} (均值 {df[col].mean():.1f})")
-            summary_signals = "\n".join(ranges)
+
+        # 遍历所有CSV文件，不再只取第一个
+        all_signals = []
+        all_ranges = []
+        for of in output_files:
+            csv_path = of.get("csv_path", "")
+            msg_name = of.get("message_name", "未知消息")
+            signal_names = of.get("signal_names", [])
+            if not csv_path or not csv_path.endswith(".csv"):
+                continue
+            try:
+                df = pd.read_csv(csv_path)
+                numeric_cols = df.select_dtypes(include="number").columns
+                if len(numeric_cols) == 0:
+                    continue
+                all_signals.extend(signal_names)
+                all_ranges.append(f"  [{msg_name}]")
+                for col in list(numeric_cols)[:15]:
+                    all_ranges.append(
+                        f"    {col}: {df[col].min():.1f} → {df[col].max():.1f} (均值 {df[col].mean():.1f})"
+                    )
+            except Exception as e:
+                logger.warning(f"读取CSV失败 {csv_path}: {e}")
+                continue
+
+        summary_signals = "\n".join(all_ranges)
 
         lines = [
             "用户提供了 CAN 报文文件，已自动解码完毕。",
             f"采集信息: {capture.get('total_frames', '?')} 帧, "
             f"成功解码 {capture.get('decoded_frames', '?')} 帧, "
-            f"时长 {capture.get('duration', '?')}s",
+            f"时长 {capture.get('duration_s', '?')}s",
         ]
-        if signals:
-            lines.append(f"可用信号 ({len(signals)} 个): {', '.join(signals[:15])}")
-            lines.append("关键信号变化区间:")
+        if all_signals:
+            unique_signals = list(dict.fromkeys(all_signals))
+            lines.append(f"可用信号 ({len(unique_signals)} 个): {', '.join(unique_signals[:20])}")
+            lines.append("各消息信号变化区间:")
             lines.append(summary_signals)
         lines.append("请根据以上信号值结合用户故障描述进行故障诊断推理。")
         return "\n".join(lines)

@@ -389,6 +389,336 @@
       "review_time": null,
       "review_comment": null,
       "created_at": "2026-08-24T15:28:40.612060"
+    },
+    {
+      "knowledge_id": "6a7ff829-e70b-4d19-951a-8012bad32e2b",
+      "conversation_id": "",
+      "extracted_entities": [
+        {
+          "entity_id": "9686b76d-fe83-407d-95ab-cae192e3dd80",
+          "entity_name": "发动机故障灯亮了",
+          "entity_type": "现象",
+          "description": "仪表指示灯点亮现象"
+        },
+        {
+          "entity_id": "958a71ca-d136-4263-bef9-3dd9bc105956",
+          "entity_name": "怠速不稳",
+          "entity_type": "现象",
+          "description": "车辆怠速时运行不平稳"
+        },
+        {
+          "entity_id": "29eb9089-5e17-490a-b504-0305c63aeb38",
+          "entity_name": "软件死区补偿未开启导致低速控制不稳",
+          "entity_type": "根因",
+          "description": "控制软件功能未启用导致控制不稳定"
+        },
+        {
+          "entity_id": "31efd365-e0bf-4000-85e6-994fa8764463",
+          "entity_name": "电机防抖参数设置不合理",
+          "entity_type": "根因",
+          "description": "防抖参数配置不当"
+        },
+        {
+          "entity_id": "1464321c-49fa-4d3f-99b9-279fc9f7354a",
+          "entity_name": "旋变信号处理精度不足",
+          "entity_type": "根因",
+          "description": "传感器信号处理精度不够"
+        },
+        {
+          "entity_id": "34557997-0c3b-4095-aa80-c93d7234d0f5",
+          "entity_name": "更新电机控制软件开启死区补偿功能",
+          "entity_type": "对策",
+          "description": "软件更新启用补偿功能"
+        },
+        {
+          "entity_id": "0c23381a-eb64-4f5b-9e11-767c487d7098",
+          "entity_name": "重新标定低速防抖参数",
+          "entity_type": "对策",
+          "description": "参数重新校准"
+        },
+        {
+          "entity_id": "f18e1a90-3a71-438a-8052-9595c3fc60ee",
+          "entity_name": "检查旋变传感器信号质量",
+          "entity_type": "对策",
+          "description": "传感器信号检测"
+        },
+        {
+          "entity_id": "a45e8000-f097-402d-a801-935368c4fdd0",
+          "entity_name": "进行低速工况测试验证",
+          "entity_type": "对策",
+          "description": "测试验证解决方案"
+        },
+        {
+          "entity_id": "81b31dbf-4500-4f6a-8d6f-7dd0338f3460",
+          "entity_name": "车辆怠速工况",
+          "entity_type": "故障场景",
+          "description": "特定运行工况"
+        }
+      ],
+      "extracted_relationships": [
+        {
+          "source_id": "软件死区补偿未开启导致低速控制不稳",
+          "target_id": "怠速不稳",
+          "relation_type": "导致",
+          "description": "参数问题导致怠速不稳定",
+          "weight": 0.8
+        },
+        {
+          "source_id": "电机防抖参数设置不合理",
+          "target_id": "怠速不稳",
+          "relation_type": "导致",
+          "description": "参数设置不当导致抖动",
+          "weight": 0.7
+        },
+        {
+          "source_id": "旋变信号处理精度不足",
+          "target_id": "怠速不稳",
+          "relation_type": "导致",
+          "description": "信号精度不足影响控制稳定性",
+          "weight": 0.6
+        },
+        {
+          "source_id": "软件死区补偿未开启导致低速控制不稳",
+          "target_id": "更新电机控制软件开启死区补偿功能",
+          "relation_type": "对应对策",
+          "description": "软件更新解决补偿问题",
+          "weight": 0.9
+        },
+        {
+          "source_id": "电机防抖参数设置不合理",
+          "target_id": "重新标定低速防抖参数",
+          "relation_type": "对应对策",
+          "description": "参数重新标定解决设置问题",
+          "weight": 0.8
+        },
+        {
+          "source_id": "旋变信号处理精度不足",
+          "target_id": "检查旋变传感器信号质量",
+          "relation_type": "对应对策",
+          "description": "检查信号质量解决精度问题",
+          "weight": 0.7
+        },
+        {
+          "source_id": "更新电机控制软件开启死区补偿功能",
+          "target_id": "怠速不稳",
+          "relation_type": "适用于",
+          "description": "软件更新适用于怠速不稳问题",
+          "weight": 0.8
+        },
+        {
+          "source_id": "重新标定低速防抖参数",
+          "target_id": "怠速不稳",
+          "relation_type": "适用于",
+          "description": "参数标定适用于怠速抖动",
+          "weight": 0.7
+        },
+        {
+          "source_id": "怠速不稳",
+          "target_id": "车辆怠速工况",
+          "relation_type": "发生于",
+          "description": "现象发生在怠速工况",
+          "weight": 0.9
+        },
+        {
+          "source_id": "软件死区补偿未开启导致低速控制不稳",
+          "target_id": "电机防抖参数设置不合理",
+          "relation_type": "并存",
+          "description": "多个控制参数问题同时存在",
+          "weight": 0.6
+        }
+      ],
+      "conversation_context": "助手: 让我先分析预检索结果与当前故障的关联性。\n\n当前故障描述是\"发动机故障灯亮了，怠速不稳\"，这是一个比较通用的描述。从预检索结果来看：\n\n1. **工单1**（相似度0.67）：虽然提到了动力系统故障灯点亮，但主要是多个故障灯同时点亮的情况，且根本原因是旋变故障相关的硬件问题，与怠速不稳的直接关联性较弱。\n\n2. **工单2-5**：这些工单主要涉及通讯超时、挂挡故障、抖动等问题，与\"发动机故障灯亮+怠速不稳\"的核心症状匹配度不高。\n\n预检索结果的相似度都在0.63-0.67之间，说明有一定的相关性，但可能不够精准。我需要进一步检索更相关的历史工单。\n助手: 让我再检索一下更具体的怠速不稳相关故障：\n助手: 现在让我查看一下预检索中提到的工单4的详细情况，因为它提到了怠速抖动的问题\n助手: 基于检索到的历史工单分析，我来给出诊断结论：\n\n## 诊断结论\n\n根据故障描述\"发动机故障灯亮了，怠速不稳\"以及检索到的历史工单分析，该故障属于**控制异常故障**。从多个相似案例来看，怠速不稳通常与电机控制系统相关，特别是低速控制算法和防抖参数设置。\n\n**根因分析**：\n1. **软件控制参数问题**：多个历史工单显示怠速抖动主要原因是软件死区补偿未开启或防抖参数设置不合理，导致低速控制不稳定\n2. **电机控制算法缺陷**：在低速段（特别是怠速工况），电机扭矩控制精度不足，容易产生抖动现象\n3. **信号处理问题**：旋变信号处理或位置传感器精度不足，影响电机控制的稳定性\n\n**解决方案**：\n1. 检查并更新电机控制软件，确保死区补偿功能正常开启\n2. 重新标定低速防抖参数，优化怠速控制算法\n3. 检查旋变传感器信号质量，确保位置检测精度\n4. 进行低速工况测试验证，确认抖动问题是否解决\n\n**风险提示**：\n该故障属于中风险（V2），虽然不会立即导致车辆无法行驶，但长期存在会影响驾驶舒适性和电机寿命。建议及时处理，避免问题恶化。\n\n**维护建议**：\n定期检查电机控制系统软件版本，确保使用最新的稳定版本。在车辆维护时注意检查低速工况下的运行平稳性。\n\n```json\n{\n  \"fault_root_cause\": [\"软件死区补偿未开启导致低速控制不稳\", \"电机防抖参数设置不合理\", \"旋变信号处理精度不足\"],\n  \"fault_trigger_condition\": \"车辆怠速工况，特别是在D/R档轻制动状态下\",\n  \"classification\": \"控制异常故障\",\n  \"solution\": [\"更新电机控制软件开启死区补偿功能\", \"重新标定低速防抖参数\", \"检查旋变传感器信号质量\", \"进行低速工况测试验证\"],\n  \"risk_warning\": \"V2\",\n  \"maintenance_suggestions\": \"定期检查电机控制系统软件版本，确保低速工况运行平稳性\",\n  \"confidence\": 0.75,\n  \"reasoning_narrative\": \"基于检索到的多个历史工单分析，特别是REC-f2a4bf6cb41c工单中明确的'软件死区补偿未开启，低速控制不稳'根因，结合其他怠速抖动案例都指向电机控制算法问题。虽然当前故障描述中提到'发动机故障灯'，但在电驱系统中这通常对应电机故障指示灯。多个相似案例显示怠速不稳主要与低速控制参数和算法相关，而非硬件故障。考虑到故障现象的普遍性和历史解决方案的有效性，判断为控制异常故障。\"\n}\n```",
+      "status": "pending",
+      "reviewer": null,
+      "review_time": null,
+      "review_comment": null,
+      "created_at": "2026-08-25T15:17:31.904749"
+    },
+    {
+      "knowledge_id": "8e657660-1e51-45df-8713-00496ece5511",
+      "conversation_id": "test-vin-fix2",
+      "extracted_entities": [
+        {
+          "entity_id": "3bc8d764-6a3e-4d23-a759-11e49e644552",
+          "entity_name": "发动机故障灯亮了",
+          "entity_type": "现象",
+          "description": "仪表指示灯点亮"
+        },
+        {
+          "entity_id": "fffe1a31-8488-4fc5-93f3-e5d10d74c30f",
+          "entity_name": "怠速不稳",
+          "entity_type": "现象",
+          "description": "车辆怠速时转速不稳定"
+        },
+        {
+          "entity_id": "87677a03-9253-4a90-9560-0d5016ba33d0",
+          "entity_name": "软件防抖参数标定不当",
+          "entity_type": "根因",
+          "description": "控制系统参数设置问题"
+        },
+        {
+          "entity_id": "57cfe395-b31f-4fd4-b112-c6ab750f5020",
+          "entity_name": "死区补偿功能未开启",
+          "entity_type": "根因",
+          "description": "控制功能未激活"
+        },
+        {
+          "entity_id": "ac084e6b-c0a1-44f3-b9e3-f3d62a8dbd81",
+          "entity_name": "硬件连接松动（母线端子等）",
+          "entity_type": "根因",
+          "description": "机械连接问题"
+        },
+        {
+          "entity_id": "e9f81ffe-e06c-4816-b4b7-6b6b19da733d",
+          "entity_name": "读取DTC故障码确定具体故障类型",
+          "entity_type": "对策",
+          "description": "诊断步骤"
+        },
+        {
+          "entity_id": "f37b6ab2-74f8-4aec-9b93-9218419782e4",
+          "entity_name": "检查MCU硬件连接状态",
+          "entity_type": "对策",
+          "description": "硬件检查"
+        },
+        {
+          "entity_id": "d1803734-55f7-40f0-94a9-962ffd305ed4",
+          "entity_name": "验证软件防抖参数设置",
+          "entity_type": "对策",
+          "description": "软件验证"
+        },
+        {
+          "entity_id": "68db4457-a948-4aa3-b175-01b66a0716b2",
+          "entity_name": "开启死区补偿功能",
+          "entity_type": "对策",
+          "description": "功能激活"
+        },
+        {
+          "entity_id": "d1d5441f-b1e9-4ed0-ac68-4f653b280895",
+          "entity_name": "车辆怠速工况",
+          "entity_type": "故障场景",
+          "description": "特定运行状态"
+        }
+      ],
+      "extracted_relationships": [
+        {
+          "source_id": "软件防抖参数标定不当",
+          "target_id": "发动机故障灯亮了",
+          "relation_type": "导致",
+          "description": "参数问题导致指示灯点亮",
+          "weight": 0.7
+        },
+        {
+          "source_id": "软件防抖参数标定不当",
+          "target_id": "怠速不稳",
+          "relation_type": "导致",
+          "description": "参数问题导致转速不稳定",
+          "weight": 0.8
+        },
+        {
+          "source_id": "死区补偿功能未开启",
+          "target_id": "发动机故障灯亮了",
+          "relation_type": "导致",
+          "description": "功能未开启导致指示灯点亮",
+          "weight": 0.6
+        },
+        {
+          "source_id": "死区补偿功能未开启",
+          "target_id": "怠速不稳",
+          "relation_type": "导致",
+          "description": "功能未开启导致转速不稳定",
+          "weight": 0.7
+        },
+        {
+          "source_id": "硬件连接松动（母线端子等）",
+          "target_id": "发动机故障灯亮了",
+          "relation_type": "导致",
+          "description": "连接问题导致指示灯点亮",
+          "weight": 0.7
+        },
+        {
+          "source_id": "硬件连接松动（母线端子等）",
+          "target_id": "怠速不稳",
+          "relation_type": "导致",
+          "description": "连接问题导致转速不稳定",
+          "weight": 0.8
+        },
+        {
+          "source_id": "软件防抖参数标定不当",
+          "target_id": "验证软件防抖参数设置",
+          "relation_type": "对应对策",
+          "description": "参数问题对应验证措施",
+          "weight": 0.9
+        },
+        {
+          "source_id": "死区补偿功能未开启",
+          "target_id": "开启死区补偿功能",
+          "relation_type": "对应对策",
+          "description": "功能未开启对应激活措施",
+          "weight": 0.9
+        },
+        {
+          "source_id": "硬件连接松动（母线端子等）",
+          "target_id": "检查MCU硬件连接状态",
+          "relation_type": "对应对策",
+          "description": "连接问题对应检查措施",
+          "weight": 0.9
+        },
+        {
+          "source_id": "验证软件防抖参数设置",
+          "target_id": "怠速不稳",
+          "relation_type": "适用于",
+          "description": "参数验证适用于转速问题",
+          "weight": 0.8
+        },
+        {
+          "source_id": "开启死区补偿功能",
+          "target_id": "怠速不稳",
+          "relation_type": "适用于",
+          "description": "功能激活适用于转速问题",
+          "weight": 0.8
+        },
+        {
+          "source_id": "检查MCU硬件连接状态",
+          "target_id": "发动机故障灯亮了",
+          "relation_type": "适用于",
+          "description": "硬件检查适用于指示灯问题",
+          "weight": 0.7
+        },
+        {
+          "source_id": "发动机故障灯亮了",
+          "target_id": "车辆怠速工况",
+          "relation_type": "发生于",
+          "description": "指示灯问题发生在怠速状态",
+          "weight": 0.8
+        },
+        {
+          "source_id": "怠速不稳",
+          "target_id": "车辆怠速工况",
+          "relation_type": "发生于",
+          "description": "转速问题发生在怠速状态",
+          "weight": 0.9
+        },
+        {
+          "source_id": "软件防抖参数标定不当",
+          "target_id": "死区补偿功能未开启",
+          "relation_type": "并存",
+          "description": "两个软件问题可能同时存在",
+          "weight": 0.6
+        },
+        {
+          "source_id": "验证软件防抖参数设置",
+          "target_id": "开启死区补偿功能",
+          "relation_type": "互斥",
+          "description": "两种软件处理措施可能互斥",
+          "weight": 0.5
+        }
+      ],
+      "conversation_context": "助手: 让我再尝试更精确地检索与发动机故障灯相关的怠速问题：\n助手: 让我查看工单REC-4e3808b93919的详细信息，这个工单最接近当前故障现象\n助手: 现在让我查询故障知识图谱，寻找更精确的诊断\n助手: ## 诊断结论\n\n基于对历史工单和故障知识图谱的分析，当前\"发动机故障灯亮了，怠速不稳\"的故障现象主要指向**控制异常故障**。从检索到的相似案例来看，这种组合故障通常由以下几个原因导致：\n\n**根因分析：**\n1. **软件控制参数问题** - 防抖参数标定不当或死区补偿未开启，导致低速控制不稳定，表现为怠速抖动\n2. **硬件连接问题** - 母线端子螺钉未打紧等机械连接问题，影响电力传输稳定性\n3. **传感器故障** - 旋变传感器端子压接不良导致信号异常，引发故障灯点亮\n\n**解决方案：**\n1. 首先读取DTC故障码，确定具体的故障类型\n2. 检查MCU硬件连接，特别是母线端子和传感器连接\n3. 验证软件版本，确认防抖参数和死区补偿设置\n4. 如为硬件问题，更换相关部件；如为软件问题，更新控制参数\n\n**风险提示：**\n此故障属于中风险（V2），虽然不会立即导致车辆完全瘫痪，但会影响驾驶平顺性和安全性。怠速不稳可能导致车辆在低速行驶时出现意外抖动，建议尽快检修。\n\n```json\n{\n  \"fault_root_cause\": [\"软件防抖参数标定不当\", \"死区补偿功能未开启\", \"硬件连接松动（母线端子等）\"],\n  \"fault_trigger_condition\": \"车辆怠速工况，特别是D/R档轻制动时\",\n  \"classification\": \"控制异常故障\",\n  \"solution\": [\"读取DTC故障码确定具体故障类型\", \"检查MCU硬件连接状态\", \"验证软件防抖参数设置\", \"开启死区补偿功能\", \"必要时更新软件或更换硬件\"],\n  \"risk_warning\": \"V2（中风险）\",\n  \"maintenance_suggestions\": \"定期检查电驱系统软件版本，确保控制参数优化；注意车辆低速行驶平顺性表现，及时发现异常\",\n  \"confidence\": 0.75,\n  \"reasoning_narrative\": \"通过分析多个相似历史工单，发现'动力系统故障灯+怠速不稳'的组合故障主要源于控制系统的软件参数问题。工单REC-f2a4bf6cb41c显示软件死区补偿未开启导致低速控制不稳，工单REC-30f818750b49表明防抖参数标定偏大引起转速震荡。同时，工单REC-4e3808b93919显示硬件连接问题（母线端子螺钉未打紧）也会导致类似现象。结合故障知识图谱中关于动力系统故障灯的相关案例，判断此故障属于控制异常范畴，需要从软件参数优化和硬件连接检查两方面入手解决。\"\n}\n```",
+      "status": "pending",
+      "reviewer": null,
+      "review_time": null,
+      "review_comment": null,
+      "created_at": "2026-08-25T15:20:34.706862"
     }
   ],
   "processed_knowledge": {
@@ -2490,17 +2820,347 @@
       "review_time": null,
       "review_comment": null,
       "created_at": "2026-08-24T15:28:40.612060"
+    },
+    "6a7ff829-e70b-4d19-951a-8012bad32e2b": {
+      "knowledge_id": "6a7ff829-e70b-4d19-951a-8012bad32e2b",
+      "conversation_id": "",
+      "extracted_entities": [
+        {
+          "entity_id": "9686b76d-fe83-407d-95ab-cae192e3dd80",
+          "entity_name": "发动机故障灯亮了",
+          "entity_type": "现象",
+          "description": "仪表指示灯点亮现象"
+        },
+        {
+          "entity_id": "958a71ca-d136-4263-bef9-3dd9bc105956",
+          "entity_name": "怠速不稳",
+          "entity_type": "现象",
+          "description": "车辆怠速时运行不平稳"
+        },
+        {
+          "entity_id": "29eb9089-5e17-490a-b504-0305c63aeb38",
+          "entity_name": "软件死区补偿未开启导致低速控制不稳",
+          "entity_type": "根因",
+          "description": "控制软件功能未启用导致控制不稳定"
+        },
+        {
+          "entity_id": "31efd365-e0bf-4000-85e6-994fa8764463",
+          "entity_name": "电机防抖参数设置不合理",
+          "entity_type": "根因",
+          "description": "防抖参数配置不当"
+        },
+        {
+          "entity_id": "1464321c-49fa-4d3f-99b9-279fc9f7354a",
+          "entity_name": "旋变信号处理精度不足",
+          "entity_type": "根因",
+          "description": "传感器信号处理精度不够"
+        },
+        {
+          "entity_id": "34557997-0c3b-4095-aa80-c93d7234d0f5",
+          "entity_name": "更新电机控制软件开启死区补偿功能",
+          "entity_type": "对策",
+          "description": "软件更新启用补偿功能"
+        },
+        {
+          "entity_id": "0c23381a-eb64-4f5b-9e11-767c487d7098",
+          "entity_name": "重新标定低速防抖参数",
+          "entity_type": "对策",
+          "description": "参数重新校准"
+        },
+        {
+          "entity_id": "f18e1a90-3a71-438a-8052-9595c3fc60ee",
+          "entity_name": "检查旋变传感器信号质量",
+          "entity_type": "对策",
+          "description": "传感器信号检测"
+        },
+        {
+          "entity_id": "a45e8000-f097-402d-a801-935368c4fdd0",
+          "entity_name": "进行低速工况测试验证",
+          "entity_type": "对策",
+          "description": "测试验证解决方案"
+        },
+        {
+          "entity_id": "81b31dbf-4500-4f6a-8d6f-7dd0338f3460",
+          "entity_name": "车辆怠速工况",
+          "entity_type": "故障场景",
+          "description": "特定运行工况"
+        }
+      ],
+      "extracted_relationships": [
+        {
+          "source_id": "软件死区补偿未开启导致低速控制不稳",
+          "target_id": "怠速不稳",
+          "relation_type": "导致",
+          "description": "参数问题导致怠速不稳定",
+          "weight": 0.8
+        },
+        {
+          "source_id": "电机防抖参数设置不合理",
+          "target_id": "怠速不稳",
+          "relation_type": "导致",
+          "description": "参数设置不当导致抖动",
+          "weight": 0.7
+        },
+        {
+          "source_id": "旋变信号处理精度不足",
+          "target_id": "怠速不稳",
+          "relation_type": "导致",
+          "description": "信号精度不足影响控制稳定性",
+          "weight": 0.6
+        },
+        {
+          "source_id": "软件死区补偿未开启导致低速控制不稳",
+          "target_id": "更新电机控制软件开启死区补偿功能",
+          "relation_type": "对应对策",
+          "description": "软件更新解决补偿问题",
+          "weight": 0.9
+        },
+        {
+          "source_id": "电机防抖参数设置不合理",
+          "target_id": "重新标定低速防抖参数",
+          "relation_type": "对应对策",
+          "description": "参数重新标定解决设置问题",
+          "weight": 0.8
+        },
+        {
+          "source_id": "旋变信号处理精度不足",
+          "target_id": "检查旋变传感器信号质量",
+          "relation_type": "对应对策",
+          "description": "检查信号质量解决精度问题",
+          "weight": 0.7
+        },
+        {
+          "source_id": "更新电机控制软件开启死区补偿功能",
+          "target_id": "怠速不稳",
+          "relation_type": "适用于",
+          "description": "软件更新适用于怠速不稳问题",
+          "weight": 0.8
+        },
+        {
+          "source_id": "重新标定低速防抖参数",
+          "target_id": "怠速不稳",
+          "relation_type": "适用于",
+          "description": "参数标定适用于怠速抖动",
+          "weight": 0.7
+        },
+        {
+          "source_id": "怠速不稳",
+          "target_id": "车辆怠速工况",
+          "relation_type": "发生于",
+          "description": "现象发生在怠速工况",
+          "weight": 0.9
+        },
+        {
+          "source_id": "软件死区补偿未开启导致低速控制不稳",
+          "target_id": "电机防抖参数设置不合理",
+          "relation_type": "并存",
+          "description": "多个控制参数问题同时存在",
+          "weight": 0.6
+        }
+      ],
+      "conversation_context": "助手: 让我先分析预检索结果与当前故障的关联性。\n\n当前故障描述是\"发动机故障灯亮了，怠速不稳\"，这是一个比较通用的描述。从预检索结果来看：\n\n1. **工单1**（相似度0.67）：虽然提到了动力系统故障灯点亮，但主要是多个故障灯同时点亮的情况，且根本原因是旋变故障相关的硬件问题，与怠速不稳的直接关联性较弱。\n\n2. **工单2-5**：这些工单主要涉及通讯超时、挂挡故障、抖动等问题，与\"发动机故障灯亮+怠速不稳\"的核心症状匹配度不高。\n\n预检索结果的相似度都在0.63-0.67之间，说明有一定的相关性，但可能不够精准。我需要进一步检索更相关的历史工单。\n助手: 让我再检索一下更具体的怠速不稳相关故障：\n助手: 现在让我查看一下预检索中提到的工单4的详细情况，因为它提到了怠速抖动的问题\n助手: 基于检索到的历史工单分析，我来给出诊断结论：\n\n## 诊断结论\n\n根据故障描述\"发动机故障灯亮了，怠速不稳\"以及检索到的历史工单分析，该故障属于**控制异常故障**。从多个相似案例来看，怠速不稳通常与电机控制系统相关，特别是低速控制算法和防抖参数设置。\n\n**根因分析**：\n1. **软件控制参数问题**：多个历史工单显示怠速抖动主要原因是软件死区补偿未开启或防抖参数设置不合理，导致低速控制不稳定\n2. **电机控制算法缺陷**：在低速段（特别是怠速工况），电机扭矩控制精度不足，容易产生抖动现象\n3. **信号处理问题**：旋变信号处理或位置传感器精度不足，影响电机控制的稳定性\n\n**解决方案**：\n1. 检查并更新电机控制软件，确保死区补偿功能正常开启\n2. 重新标定低速防抖参数，优化怠速控制算法\n3. 检查旋变传感器信号质量，确保位置检测精度\n4. 进行低速工况测试验证，确认抖动问题是否解决\n\n**风险提示**：\n该故障属于中风险（V2），虽然不会立即导致车辆无法行驶，但长期存在会影响驾驶舒适性和电机寿命。建议及时处理，避免问题恶化。\n\n**维护建议**：\n定期检查电机控制系统软件版本，确保使用最新的稳定版本。在车辆维护时注意检查低速工况下的运行平稳性。\n\n```json\n{\n  \"fault_root_cause\": [\"软件死区补偿未开启导致低速控制不稳\", \"电机防抖参数设置不合理\", \"旋变信号处理精度不足\"],\n  \"fault_trigger_condition\": \"车辆怠速工况，特别是在D/R档轻制动状态下\",\n  \"classification\": \"控制异常故障\",\n  \"solution\": [\"更新电机控制软件开启死区补偿功能\", \"重新标定低速防抖参数\", \"检查旋变传感器信号质量\", \"进行低速工况测试验证\"],\n  \"risk_warning\": \"V2\",\n  \"maintenance_suggestions\": \"定期检查电机控制系统软件版本，确保低速工况运行平稳性\",\n  \"confidence\": 0.75,\n  \"reasoning_narrative\": \"基于检索到的多个历史工单分析，特别是REC-f2a4bf6cb41c工单中明确的'软件死区补偿未开启，低速控制不稳'根因，结合其他怠速抖动案例都指向电机控制算法问题。虽然当前故障描述中提到'发动机故障灯'，但在电驱系统中这通常对应电机故障指示灯。多个相似案例显示怠速不稳主要与低速控制参数和算法相关，而非硬件故障。考虑到故障现象的普遍性和历史解决方案的有效性，判断为控制异常故障。\"\n}\n```",
+      "status": "pending",
+      "reviewer": null,
+      "review_time": null,
+      "review_comment": null,
+      "created_at": "2026-08-25T15:17:31.904749"
+    },
+    "8e657660-1e51-45df-8713-00496ece5511": {
+      "knowledge_id": "8e657660-1e51-45df-8713-00496ece5511",
+      "conversation_id": "test-vin-fix2",
+      "extracted_entities": [
+        {
+          "entity_id": "3bc8d764-6a3e-4d23-a759-11e49e644552",
+          "entity_name": "发动机故障灯亮了",
+          "entity_type": "现象",
+          "description": "仪表指示灯点亮"
+        },
+        {
+          "entity_id": "fffe1a31-8488-4fc5-93f3-e5d10d74c30f",
+          "entity_name": "怠速不稳",
+          "entity_type": "现象",
+          "description": "车辆怠速时转速不稳定"
+        },
+        {
+          "entity_id": "87677a03-9253-4a90-9560-0d5016ba33d0",
+          "entity_name": "软件防抖参数标定不当",
+          "entity_type": "根因",
+          "description": "控制系统参数设置问题"
+        },
+        {
+          "entity_id": "57cfe395-b31f-4fd4-b112-c6ab750f5020",
+          "entity_name": "死区补偿功能未开启",
+          "entity_type": "根因",
+          "description": "控制功能未激活"
+        },
+        {
+          "entity_id": "ac084e6b-c0a1-44f3-b9e3-f3d62a8dbd81",
+          "entity_name": "硬件连接松动（母线端子等）",
+          "entity_type": "根因",
+          "description": "机械连接问题"
+        },
+        {
+          "entity_id": "e9f81ffe-e06c-4816-b4b7-6b6b19da733d",
+          "entity_name": "读取DTC故障码确定具体故障类型",
+          "entity_type": "对策",
+          "description": "诊断步骤"
+        },
+        {
+          "entity_id": "f37b6ab2-74f8-4aec-9b93-9218419782e4",
+          "entity_name": "检查MCU硬件连接状态",
+          "entity_type": "对策",
+          "description": "硬件检查"
+        },
+        {
+          "entity_id": "d1803734-55f7-40f0-94a9-962ffd305ed4",
+          "entity_name": "验证软件防抖参数设置",
+          "entity_type": "对策",
+          "description": "软件验证"
+        },
+        {
+          "entity_id": "68db4457-a948-4aa3-b175-01b66a0716b2",
+          "entity_name": "开启死区补偿功能",
+          "entity_type": "对策",
+          "description": "功能激活"
+        },
+        {
+          "entity_id": "d1d5441f-b1e9-4ed0-ac68-4f653b280895",
+          "entity_name": "车辆怠速工况",
+          "entity_type": "故障场景",
+          "description": "特定运行状态"
+        }
+      ],
+      "extracted_relationships": [
+        {
+          "source_id": "软件防抖参数标定不当",
+          "target_id": "发动机故障灯亮了",
+          "relation_type": "导致",
+          "description": "参数问题导致指示灯点亮",
+          "weight": 0.7
+        },
+        {
+          "source_id": "软件防抖参数标定不当",
+          "target_id": "怠速不稳",
+          "relation_type": "导致",
+          "description": "参数问题导致转速不稳定",
+          "weight": 0.8
+        },
+        {
+          "source_id": "死区补偿功能未开启",
+          "target_id": "发动机故障灯亮了",
+          "relation_type": "导致",
+          "description": "功能未开启导致指示灯点亮",
+          "weight": 0.6
+        },
+        {
+          "source_id": "死区补偿功能未开启",
+          "target_id": "怠速不稳",
+          "relation_type": "导致",
+          "description": "功能未开启导致转速不稳定",
+          "weight": 0.7
+        },
+        {
+          "source_id": "硬件连接松动（母线端子等）",
+          "target_id": "发动机故障灯亮了",
+          "relation_type": "导致",
+          "description": "连接问题导致指示灯点亮",
+          "weight": 0.7
+        },
+        {
+          "source_id": "硬件连接松动（母线端子等）",
+          "target_id": "怠速不稳",
+          "relation_type": "导致",
+          "description": "连接问题导致转速不稳定",
+          "weight": 0.8
+        },
+        {
+          "source_id": "软件防抖参数标定不当",
+          "target_id": "验证软件防抖参数设置",
+          "relation_type": "对应对策",
+          "description": "参数问题对应验证措施",
+          "weight": 0.9
+        },
+        {
+          "source_id": "死区补偿功能未开启",
+          "target_id": "开启死区补偿功能",
+          "relation_type": "对应对策",
+          "description": "功能未开启对应激活措施",
+          "weight": 0.9
+        },
+        {
+          "source_id": "硬件连接松动（母线端子等）",
+          "target_id": "检查MCU硬件连接状态",
+          "relation_type": "对应对策",
+          "description": "连接问题对应检查措施",
+          "weight": 0.9
+        },
+        {
+          "source_id": "验证软件防抖参数设置",
+          "target_id": "怠速不稳",
+          "relation_type": "适用于",
+          "description": "参数验证适用于转速问题",
+          "weight": 0.8
+        },
+        {
+          "source_id": "开启死区补偿功能",
+          "target_id": "怠速不稳",
+          "relation_type": "适用于",
+          "description": "功能激活适用于转速问题",
+          "weight": 0.8
+        },
+        {
+          "source_id": "检查MCU硬件连接状态",
+          "target_id": "发动机故障灯亮了",
+          "relation_type": "适用于",
+          "description": "硬件检查适用于指示灯问题",
+          "weight": 0.7
+        },
+        {
+          "source_id": "发动机故障灯亮了",
+          "target_id": "车辆怠速工况",
+          "relation_type": "发生于",
+          "description": "指示灯问题发生在怠速状态",
+          "weight": 0.8
+        },
+        {
+          "source_id": "怠速不稳",
+          "target_id": "车辆怠速工况",
+          "relation_type": "发生于",
+          "description": "转速问题发生在怠速状态",
+          "weight": 0.9
+        },
+        {
+          "source_id": "软件防抖参数标定不当",
+          "target_id": "死区补偿功能未开启",
+          "relation_type": "并存",
+          "description": "两个软件问题可能同时存在",
+          "weight": 0.6
+        },
+        {
+          "source_id": "验证软件防抖参数设置",
+          "target_id": "开启死区补偿功能",
+          "relation_type": "互斥",
+          "description": "两种软件处理措施可能互斥",
+          "weight": 0.5
+        }
+      ],
+      "conversation_context": "助手: 让我再尝试更精确地检索与发动机故障灯相关的怠速问题：\n助手: 让我查看工单REC-4e3808b93919的详细信息，这个工单最接近当前故障现象\n助手: 现在让我查询故障知识图谱，寻找更精确的诊断\n助手: ## 诊断结论\n\n基于对历史工单和故障知识图谱的分析，当前\"发动机故障灯亮了，怠速不稳\"的故障现象主要指向**控制异常故障**。从检索到的相似案例来看，这种组合故障通常由以下几个原因导致：\n\n**根因分析：**\n1. **软件控制参数问题** - 防抖参数标定不当或死区补偿未开启，导致低速控制不稳定，表现为怠速抖动\n2. **硬件连接问题** - 母线端子螺钉未打紧等机械连接问题，影响电力传输稳定性\n3. **传感器故障** - 旋变传感器端子压接不良导致信号异常，引发故障灯点亮\n\n**解决方案：**\n1. 首先读取DTC故障码，确定具体的故障类型\n2. 检查MCU硬件连接，特别是母线端子和传感器连接\n3. 验证软件版本，确认防抖参数和死区补偿设置\n4. 如为硬件问题，更换相关部件；如为软件问题，更新控制参数\n\n**风险提示：**\n此故障属于中风险（V2），虽然不会立即导致车辆完全瘫痪，但会影响驾驶平顺性和安全性。怠速不稳可能导致车辆在低速行驶时出现意外抖动，建议尽快检修。\n\n```json\n{\n  \"fault_root_cause\": [\"软件防抖参数标定不当\", \"死区补偿功能未开启\", \"硬件连接松动（母线端子等）\"],\n  \"fault_trigger_condition\": \"车辆怠速工况，特别是D/R档轻制动时\",\n  \"classification\": \"控制异常故障\",\n  \"solution\": [\"读取DTC故障码确定具体故障类型\", \"检查MCU硬件连接状态\", \"验证软件防抖参数设置\", \"开启死区补偿功能\", \"必要时更新软件或更换硬件\"],\n  \"risk_warning\": \"V2（中风险）\",\n  \"maintenance_suggestions\": \"定期检查电驱系统软件版本，确保控制参数优化；注意车辆低速行驶平顺性表现，及时发现异常\",\n  \"confidence\": 0.75,\n  \"reasoning_narrative\": \"通过分析多个相似历史工单，发现'动力系统故障灯+怠速不稳'的组合故障主要源于控制系统的软件参数问题。工单REC-f2a4bf6cb41c显示软件死区补偿未开启导致低速控制不稳，工单REC-30f818750b49表明防抖参数标定偏大引起转速震荡。同时，工单REC-4e3808b93919显示硬件连接问题（母线端子螺钉未打紧）也会导致类似现象。结合故障知识图谱中关于动力系统故障灯的相关案例，判断此故障属于控制异常范畴，需要从软件参数优化和硬件连接检查两方面入手解决。\"\n}\n```",
+      "status": "pending",
+      "reviewer": null,
+      "review_time": null,
+      "review_comment": null,
+      "created_at": "2026-08-25T15:20:34.706862"
     }
   },
   "stats": {
-    "extractions": 16,
-    "entities_extracted": 173,
-    "relationships_extracted": 120,
-    "submitted_for_review": 16,
+    "extractions": 18,
+    "entities_extracted": 193,
+    "relationships_extracted": 146,
+    "submitted_for_review": 18,
     "approved_knowledge": 10,
     "rejected_knowledge": 4,
     "errors": 2,
     "merged_entities": 25
   },
-  "saved_at": "2026-08-24T15:28:40.613065"
+  "saved_at": "2026-08-25T15:20:34.707895"
 }

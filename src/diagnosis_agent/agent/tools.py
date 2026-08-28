@@ -22,7 +22,6 @@ from ..config import Settings
 from ..models.incident import IncidentRecord
 from ..retrieval.langchain_retrievers import ChromaVectorRetriever, document_to_record
 from ..storage.vector_store import SearchResult
-from ..tools.can_converter_tool import build_can_converter_tool
 
 logger = logging.getLogger(__name__)
 
@@ -324,7 +323,6 @@ class DiagnosticTools:
                     args_schema=QueryFaultGraphInput,
                 )
             )
-        tools.append(build_can_converter_tool())
         tools.extend([
             StructuredTool.from_function(
                 func=self._get_incident_detail_impl,

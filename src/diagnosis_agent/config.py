@@ -194,6 +194,14 @@ class ToolCallConfig(BaseModel):
     show_details: bool = True
 
 
+class CanFallbackConfig(BaseModel):
+    """CAN报文兜底底层配置"""
+    enabled: bool = True
+    min_similar_record_score: float = 0.6
+    min_diagnosis_confidence: float = 0.7
+    max_redo_times: int = 1
+
+
 class Settings(BaseModel):
     """全局配置根模型"""
 
@@ -207,6 +215,7 @@ class Settings(BaseModel):
     context: ContextConfig = Field(default_factory=ContextConfig)
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     tool_call: ToolCallConfig = Field(default_factory=ToolCallConfig)
+    can_fallback: CanFallbackConfig = Field(default_factory=CanFallbackConfig)
 
 
 # ---------------------------------------------------------------------------

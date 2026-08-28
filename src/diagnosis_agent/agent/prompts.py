@@ -38,7 +38,19 @@ def build_similar_case_prompt(
 def build_no_similar_case_prompt(
     description: str,
 ) -> str:
-    """构建无预检索时的 user prompt"""
+    """构建无预检索时的 user prompt
+
+    # ====== 兜底推理路径 ======
+    # 这是「预检索未找到相似工况」时的专门兜底 prompt。
+    # 目前：让主 Agent LLM 基于领域知识直接推理（无历史工单证据）。
+    #
+    # 计划改造（待做任务，见 memory: 故障兜底查询层）：
+    #   1. 这条 prompt 的推理职责将移交给新增的「故障循环查询层」
+    #   2. 故障循环查询层接收：故障描述 + CAN 信号摘要（如果有）
+    #   3. 主 Agent LLM 改为只做 JSON 结构化提取，不再承担推理
+    #   4. 这条 prompt 对应改造为：故障循环查询层的输入/系统 prompt
+    # ==========================
+    """
     return f"""## 当前故障描述
 
 {description}

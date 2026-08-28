@@ -154,6 +154,9 @@ class DiagnosisTask:
         self.created_at = datetime.now()
         self.updated_at = datetime.now()
         self._req = req
+        # CAN报文兜底字段：暂存文件引用、诊断轮次
+        self.stored_fault_data_url: str | None = req.faultDataUrl if req.faultDataUrl else None
+        self.diagnose_round: int = 0
 
     def touch(self):
         self.updated_at = datetime.now()

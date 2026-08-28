@@ -1,16 +1,19 @@
-"""异步任务管理 — 执行诊断 + 回调平台 + 知识沉淀"""
+"""异步任务管理 — 执行诊断 + 回调平台 + 知识沉淀
+
+CAN 兜底解码逻辑已下沉到 Agent 主流程（见 tools/can_fallback.py），
+本模块只负责请求接入、任务调度和回调。
+"""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
-from uuid import uuid4
 
 import httpx
 
 from ..config import get_settings
+from ..agent.langchain_agent import LangChainDiagnosticAgent
 from .models import (
     DiagnosisTask,
     ExecutionStatus,
@@ -59,37 +62,29 @@ task_manager = TaskManager()
 
 
 async def execute_diagnosis(task: DiagnosisTask, req: PlatformDiagnosisRequest):
-    """后台执行诊断，完成后回调平台"""
+    """后台执行诊断，完成后回调平台
+
+    职责：任务状态管理 + 委托 Agent 诊断 + 回调平台 + 知识提取。
+    业务逻辑（预检索、CAN 兜底、主诊断）全部在 Agent 内部完成。
+    """
     try:
         task.status = ExecutionStatus.RUNNING.value
         task.touch()
 
         logger.info(f"[{task.requestId}] 开始诊断: {req.raw_query[:60]}...")
 
-        # 1. 构建 StandardInput
+        # 1. 构建 StandardInput + 获取历史消息
         std_input = to_standard_input(req)
-
-        # 2. 获取历史消息
         history = build_history_messages(req.conversationId, req.context_history)
 
-        # 3. 预处理 CAN 文件（如有）
-        prepared = None
-        if req.faultDataUrl:
-            can_summary = await preprocess_can_file(req.faultDataUrl)
-            if can_summary:
-                from langchain_core.messages import SystemMessage
-                prepared = [SystemMessage(content=can_summary)]
-                logger.info(f"[{task.requestId}] CAN 报文预处理完成")
-
-        # 4. 执行诊断
-        from ..agent.langchain_agent import LangChainDiagnosticAgent
+        # 2. 委托 Agent 完成诊断（预检索 + CAN 兜底 + 主诊断全部在 Agent 内部）
         settings = get_settings()
         agent = LangChainDiagnosticAgent(settings=settings)
-        output = agent.diagnose_with_standard_input(
-            std_input, history_messages=history, prepared_messages=prepared,
+        output = await agent.diagnose_with_can_fallback(
+            std_input, history_messages=history,
         )
 
-        # 5. 构建回调结果
+        # 3. 构建回调结果
         if output.code == 0:
             callback_body = to_callback_result(task, output)
         else:
@@ -101,10 +96,10 @@ async def execute_diagnosis(task: DiagnosisTask, req: PlatformDiagnosisRequest):
 
         logger.info(f"[{task.requestId}] 诊断完成, 回调: {task.callbackUrl}")
 
-        # 6. 回调平台
+        # 4. 回调平台
         await _callback_platform(task, callback_body)
 
-        # 7. 异步知识提取（不阻塞回调）
+        # 5. 异步知识提取（不阻塞回调）
         asyncio.create_task(
             _extract_knowledge_async(req, output, settings)
         )
@@ -146,7 +141,6 @@ async def _extract_knowledge_async(
 
     不阻塞主流程，失败时静默忽略。
     """
-    """异步知识提取"""
     try:
         if not settings.knowledge.enabled:
             return
@@ -169,90 +163,3 @@ async def _extract_knowledge_async(
                      f"实体={len(knowledge.extracted_entities)}, 关系={len(knowledge.extracted_relationships)}")
     except Exception as e:
         logger.warning(f"知识提取失败: {e}")
-
-
-async def preprocess_can_file(fault_data_url: str) -> str | None:
-    """下载 CAN 文件 → 解码 → 提取信号摘要 → 返回 Agent 可读文本
-
-    fault_data_url 为逗号分隔的多文件链接，首个为 CAN 日志，第二个为 DBC 文件(可选)。
-    """
-    import pandas as pd
-
-    urls = [u.strip() for u in fault_data_url.split(",") if u.strip()]
-    if not urls:
-        return None
-
-    tmp_dir = Path("data/can_downloads")
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        can_url = urls[0]
-        dbc_url = urls[1] if len(urls) > 1 else None
-        can_path, dbc_path = None, None
-        async with httpx.AsyncClient(timeout=300) as client:
-            can_resp = await client.get(can_url)
-            can_ext = Path(can_url).suffix or ".asc"
-            can_path = str(tmp_dir / f"can_{uuid4().hex}{can_ext}")
-            with open(can_path, "wb") as f:
-                f.write(can_resp.content)
-            if dbc_url:
-                dbc_resp = await client.get(dbc_url)
-                dbc_path = str(tmp_dir / f"dbc_{uuid4().hex}.dbc")
-                with open(dbc_path, "wb") as f:
-                    f.write(dbc_resp.content)
-
-        if not dbc_path or not can_path:
-            return None
-
-        from ..tools.can_converter_tool import can_converter_impl
-        result = json.loads(can_converter_impl(file_path=can_path, dbc_path=dbc_path, output_dir=str(tmp_dir)))
-        if result.get("status") != "success":
-            logger.warning(f"CAN 解码失败: {result.get('errors', 'unknown')}")
-            return None
-
-        capture = result.get("capture", {})
-        output_files = result.get("output_files", [])
-
-        # 遍历所有CSV文件，不再只取第一个
-        all_signals = []
-        all_ranges = []
-        for of in output_files:
-            csv_path = of.get("csv_path", "")
-            msg_name = of.get("message_name", "未知消息")
-            signal_names = of.get("signal_names", [])
-            if not csv_path or not csv_path.endswith(".csv"):
-                continue
-            try:
-                df = pd.read_csv(csv_path)
-                numeric_cols = df.select_dtypes(include="number").columns
-                if len(numeric_cols) == 0:
-                    continue
-                all_signals.extend(signal_names)
-                all_ranges.append(f"  [{msg_name}]")
-                for col in list(numeric_cols)[:15]:
-                    all_ranges.append(
-                        f"    {col}: {df[col].min():.1f} → {df[col].max():.1f} (均值 {df[col].mean():.1f})"
-                    )
-            except Exception as e:
-                logger.warning(f"读取CSV失败 {csv_path}: {e}")
-                continue
-
-        summary_signals = "\n".join(all_ranges)
-
-        lines = [
-            "用户提供了 CAN 报文文件，已自动解码完毕。",
-            f"采集信息: {capture.get('total_frames', '?')} 帧, "
-            f"成功解码 {capture.get('decoded_frames', '?')} 帧, "
-            f"时长 {capture.get('duration_s', '?')}s",
-        ]
-        if all_signals:
-            unique_signals = list(dict.fromkeys(all_signals))
-            lines.append(f"可用信号 ({len(unique_signals)} 个): {', '.join(unique_signals[:20])}")
-            lines.append("各消息信号变化区间:")
-            lines.append(summary_signals)
-        lines.append("请根据以上信号值结合用户故障描述进行故障诊断推理。")
-        return "\n".join(lines)
-
-    except Exception as e:
-        logger.warning(f"CAN 预处理失败: {e}")
-        return None

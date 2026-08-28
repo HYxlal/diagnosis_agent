@@ -145,3 +145,4 @@ class DiagnosticOutput(BaseModel):
         default_factory=dict,
         description="LLM 推理结果（包含新结构字段: fault_root_cause, classification, solution 等）",
     )
+    top1_similar_score: float = Field(0.0, description="第一轮检索返回的Top1相似工况分数 0-1，用于CAN兜底阈值判定")

@@ -921,8 +921,8 @@ def chat(
             raw_query=query,
             vehicleModel=mcuid,
             conversationId=sess_id,
-            VIN="",
-            faultOccurTime="",
+            VIN="CLI_DEFAULT",
+            faultOccurTime="2026-01-01T00:00:00",
             mileage=0.0,
         )
 

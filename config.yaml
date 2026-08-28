@@ -171,3 +171,11 @@ knowledge:
 # 工具调用展示配置
 tool_call:
   show_details: true
+
+# CAN报文兜底底层配置
+can_fallback:
+  enabled: true
+  # 双阈值触发规则：满足任意一个条件即触发CAN报文兜底处理
+  min_similar_record_score: 0.6   # 检索返回的Top1相似工况分数低于此值
+  min_diagnosis_confidence: 0.7   # LLM第一轮输出的诊断置信度低于此值
+  max_redo_times: 1               # 最大重诊断次数，防止无限循环

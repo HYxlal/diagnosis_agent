@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -172,11 +173,23 @@ class LangChainDiagnosticAgent:
             router = InputRouter(self.settings)
             parsed_input = router.route(parsed_input)
 
+            # CAN 兜底：同步上下文用 asyncio.run() 调 async 方法
+            # 预检索 + 阈值判定 + CAN 解码，结果合并到 prepared_messages
+            description = parsed_input.description or ""
+            similar_cases, has_similar, top1_score = self.pre_retrieve(
+                parsed_input, description
+            )
+            can_prepared = asyncio.run(self._maybe_can_fallback(
+                parsed_input, has_similar, top1_score
+            ))
+            merged_prepared = list(prepared_messages or []) + (can_prepared or [])
+
             # 把 history_messages / prepared_messages 透传给内部 diagnose
             diagnostic_output = self.diagnose(
                 parsed_input,
                 history_messages=history_messages,
-                prepared_messages=prepared_messages,
+                prepared_messages=merged_prepared or None,
+                similar_cases=similar_cases,
             )
         except Exception as e:
             logger.error(f"诊断执行失败: {e}")
@@ -201,11 +214,206 @@ class LangChainDiagnosticAgent:
                 standard_input=standard_input,
             )
 
+    async def _maybe_can_fallback(
+        self,
+        parsed_input: ParsedInput,
+        has_similar: bool,
+        top1_score: float,
+    ) -> list | None:
+        """CAN 兜底判定：检索结果不足时，async 解码 CAN 报文注入上下文
+
+        平台 handler（async 上下文）直接 await 调用。
+        chat/CLI（同步上下文）通过 asyncio.run() 调用。
+
+        # ====== TODO: CAN 兜底流程重构 ======
+        # 当前：CAN 解码 → 信号摘要注入 Agent 上下文 → Agent LLM 做故障推理
+        # 计划改为：CAN 解码 → 故障循环查询层（专门做推理）→ 只提取 JSON 的 LLM
+        # 即：不再把 CAN 兜底的故障推理交给主 Agent LLM，
+        #     而是中间走一个独立的故障循环查询层 + 专用 JSON 提取 LLM
+        # 改造时关注：
+        #   1. preprocess_can_file 输出的摘要格式（见 tools/can_fallback.py）
+        #   2. 注入方式 SystemMessage → 可能改为独立查询层输入
+        #   3. 主 Agent 的 system prompt（见 prompts/agent.py）需相应调整
+        # ==================================
+        """
+        if not (
+            self.settings.can_fallback.enabled
+            and getattr(parsed_input, "faultDataUrl", "")
+            and (
+                not has_similar
+                or top1_score < self.settings.can_fallback.min_similar_record_score
+            )
+        ):
+            return None
+
+        logger.info("预检索结果不足，触发 CAN 报文兜底处理")
+        try:
+            from ..tools.can_fallback import preprocess_can_file
+            can_summary = await preprocess_can_file(parsed_input.faultDataUrl)
+            if can_summary:
+                from langchain_core.messages import SystemMessage
+                logger.info("CAN 报文预处理完成，注入 Agent 上下文")
+                return [SystemMessage(content=can_summary)]
+        except Exception as e:
+            logger.warning(f"CAN 兜底解码失败: {e}")
+        return None
+
+    async def diagnose_with_can_fallback(
+        self,
+        standard_input: StandardInput,
+        history_messages: list[dict] | None = None,
+    ) -> StandardOutput:
+        """平台适配层专用入口：预检索 + CAN 兜底 + 主诊断一体化
+
+        与 diagnose_with_standard_input 的区别：
+        - 预检索后自动判定是否需要 CAN 兜底
+        - CAN 解码用 async httpx，不阻塞事件循环
+        - 适合 handler（async 上下文）调用，不适合 chat/CLI（同步上下文）
+
+        流程：
+        1. 验证输入 + 转换 ParsedInput + 意图路由
+        2. 预检索（Chroma + Neo4j），拿到 similar_cases 和 top1_score
+        3. 阈值判定：结果不足 → await preprocess_can_file 异步解码
+        4. 调用 diagnose() 主流程，复用预检索结果
+        5. 转换为 StandardOutput 返回
+        """
+        # 1. 验证输入
+        validation_error = validate_standard_input(standard_input)
+        if validation_error:
+            logger.error(f"标准输入验证失败: {validation_error}")
+            return build_error_output(
+                code=OutputCode.MISSING_INPUT,
+                msg=validation_error,
+                standard_input=standard_input,
+            )
+
+        # 2. 转换 + 意图路由
+        try:
+            parsed_input = standard_input_to_parsed(standard_input)
+            from ..agent.input_router import InputRouter
+            router = InputRouter(self.settings)
+            parsed_input = router.route(parsed_input)
+        except Exception as e:
+            logger.error(f"输入转换/路由失败: {e}")
+            return build_error_output(
+                code=OutputCode.INTERNAL_ERROR,
+                msg=f"输入转换/路由失败: {str(e)}",
+                standard_input=standard_input,
+            )
+
+        # 3. 预检索（只跑一次）
+        description = parsed_input.description or ""
+        similar_cases, has_similar, top1_score = self.pre_retrieve(
+            parsed_input, description
+        )
+
+        # 4. CAN 兜底：检索不足 → async 解码不阻塞事件循环
+        prepared = await self._maybe_can_fallback(
+            parsed_input, has_similar, top1_score
+        )
+
+        # 5. 主诊断：复用预检索结果
+        try:
+            diagnostic_output = self.diagnose(
+                parsed_input,
+                history_messages=history_messages,
+                prepared_messages=prepared,
+                similar_cases=similar_cases,
+            )
+        except Exception as e:
+            logger.error(f"诊断执行失败: {e}")
+            return build_error_output(
+                code=OutputCode.INTERNAL_ERROR,
+                msg=f"诊断执行失败: {str(e)}",
+                standard_input=standard_input,
+            )
+
+        # 6. 转换为标准输出
+        try:
+            return diagnostic_output_to_standard(diagnostic_output, standard_input)
+        except Exception as e:
+            logger.error(f"输出转换失败: {e}")
+            return build_error_output(
+                code=OutputCode.INTERNAL_ERROR,
+                msg=f"输出转换失败: {str(e)}",
+                standard_input=standard_input,
+            )
+
+    def pre_retrieve(
+        self,
+        parsed_input: ParsedInput,
+        description: str = "",
+    ) -> tuple[list, bool, float]:
+        """预检索：语义检索 + Neo4j 结构化召回
+
+        返回 (similar_cases, has_similar, top1_similar_score)
+        """
+        similar_cases: list = []
+        has_similar = False
+        top1_similar_score = 0.0
+
+        try:
+            query = parsed_input.search_query or description
+            # 语义检索（Chroma）
+            similar_cases = self._retriever.semantic_search(query=query, top_k=5)
+            # Neo4j 结构化召回
+            seen_ids = set()
+            try:
+                neo4j_candidates = self._retriever.neo4j.structured_recall(
+                    vehicleModel=parsed_input.vehicleModel if parsed_input.vehicleModel else None,
+                    dtc_codes=parsed_input.dtcCode if parsed_input.dtcCode else None,
+                    indicators=[
+                        i.value for i in parsed_input.instrumentIndicatorList
+                        if i.value and i.value != "无"
+                    ] if parsed_input.instrumentIndicatorList else None,
+                    scenarios=[
+                        parsed_input.faultWorkConditionList.value
+                    ] if parsed_input.faultWorkConditionList.value != "无法确认故障工况" else None,
+                    softwareVersion=parsed_input.softwareVersion if parsed_input.softwareVersion else None,
+                    motorPosition=parsed_input.motorPosition.value if parsed_input.motorPosition.value != "无法确认具体电机" else None,
+                    VIN=parsed_input.VIN if parsed_input.VIN else None,
+                    limit=5, depth=2
+                )
+                neo4j_docs = [c.to_document() for c in neo4j_candidates]
+                # 合并去重（按 record_id）
+                for d in similar_cases:
+                    rid = d.metadata.get("id", "")
+                    if rid:
+                        seen_ids.add(rid)
+                for d in neo4j_docs:
+                    rid = d.metadata.get("id", "")
+                    if rid and rid not in seen_ids:
+                        seen_ids.add(rid)
+                        similar_cases.append(d)
+                if neo4j_candidates:
+                    logger.info(f"预检索: Neo4j 补充 {len(neo4j_candidates)} 条")
+            except Exception as e:
+                logger.warning(f"预检索 Neo4j 召回失败: {e}")
+
+            has_similar = len(similar_cases) > 0
+            if similar_cases:
+                top1_similar_score = similar_cases[0].metadata.get("score", 0.0)
+            if has_similar:
+                logger.info(
+                    f"预检索: 共 {len(similar_cases)} 条相似工况, Top1相似度={top1_similar_score:.2f}"
+                )
+                # 终端打印预检索工单
+                self._print_pre_retrieval_cases(similar_cases)
+            else:
+                logger.info(
+                    f"预检索: 未找到相似工况"
+                )
+        except Exception as e:
+            logger.warning(f"预检索失败，Agent 将自主检索: {e}")
+
+        return similar_cases, has_similar, top1_similar_score
+
     def diagnose(
         self,
         parsed_input: ParsedInput,
         history_messages: list[dict] | None = None,
         prepared_messages: list | None = None,
+        similar_cases: list | None = None,
     ) -> DiagnosticOutput:
         """执行完整诊断流程（内部方法）
 
@@ -241,60 +449,16 @@ class LangChainDiagnosticAgent:
             parsed_input.intent = InputIntent.DIAGNOSTIC_QUERY
 
         # ── 预检索：话题检测通过后，主流程做一轮语义检索 + Neo4j 结构化召回 ──
-        similar_cases: list = []
-        has_similar = False
-
-        try:
-            query = parsed_input.search_query or description
-            # 语义检索（Chroma）
-            similar_cases = self._retriever.semantic_search(query=query, top_k=5)
-            # Neo4j 结构化召回
-            try:
-                neo4j_candidates = self._retriever.neo4j.structured_recall(
-                    vehicleModel=parsed_input.vehicleModel if parsed_input.vehicleModel else None,
-                    dtc_codes=parsed_input.dtcCode if parsed_input.dtcCode else None,
-                    indicators=[
-                        i.value for i in parsed_input.instrumentIndicatorList
-                        if i.value and i.value != "无"
-                    ] if parsed_input.instrumentIndicatorList else None,
-                    scenarios=[
-                        parsed_input.faultWorkConditionList.value
-                    ] if parsed_input.faultWorkConditionList.value != "无法确认故障工况" else None,
-                    softwareVersion=parsed_input.softwareVersion if parsed_input.softwareVersion else None,
-                    motorPosition=parsed_input.motorPosition.value if parsed_input.motorPosition.value != "无法确认具体电机" else None,
-                    VIN=parsed_input.VIN if parsed_input.VIN else None,
-                    limit=5, depth=2
-                )
-                neo4j_docs = [c.to_document() for c in neo4j_candidates]
-                # 合并去重（按 record_id）
-                seen_ids = set()
-                for d in similar_cases:
-                    rid = d.metadata.get("id", "")
-                    if rid:
-                        seen_ids.add(rid)
-                for d in neo4j_docs:
-                    rid = d.metadata.get("id", "")
-                    if rid and rid not in seen_ids:
-                        seen_ids.add(rid)
-                        similar_cases.append(d)
-                if neo4j_candidates:
-                    logger.info(f"预检索: Neo4j 补充 {len(neo4j_candidates)} 条")
-            except Exception as e:
-                logger.warning(f"预检索 Neo4j 召回失败: {e}")
-
-            has_similar = len(similar_cases) > 0
-            if has_similar:
-                logger.info(
-                    f"预检索: 共 {len(similar_cases)} 条相似工况"
-                )
-                # 终端打印预检索工单
-                self._print_pre_retrieval_cases(similar_cases)
-            else:
-                logger.info(
-                    f"预检索: 未找到相似工况"
-                )
-        except Exception as e:
-            logger.warning(f"预检索失败，Agent 将自主检索: {e}")
+        query = parsed_input.search_query or description
+        # 如果调用方已经传入 similar_cases，则复用，不再重复检索
+        if similar_cases is None:
+            similar_cases, _, _ = self.pre_retrieve(parsed_input, description)
+        else:
+            logger.info("复用外部传入的预检索结果，跳过重复检索")
+        has_similar = len(similar_cases) > 0
+        # 兼容旧路径：没有传入 similar_cases 时，pre_retrieve 内部已经打印日志和终端表格
+        # 调用方如果已经传入 prepared_messages（如 handler 注入的 CAN 摘要），直接透传
+        prepared_with_can = list(prepared_messages or [])
 
         reasoning_result, tool_calls, react_steps = self._run_agent(
             description=description,
@@ -302,7 +466,7 @@ class LangChainDiagnosticAgent:
             has_similar=has_similar,
             search_query=query,
             history_messages=history_messages,
-            prepared_messages=prepared_messages,
+            prepared_messages=prepared_with_can,
         )
 
         findings = self._build_findings(reasoning_result, similar_cases)
@@ -321,8 +485,8 @@ class LangChainDiagnosticAgent:
             )
             for doc in similar_cases
         ]
-        seen_ids = set()
         # 优先从预检索结果填充
+        seen_ids = set()
         similar_case_models = []
         for c in pre_retrieval_cases:
             if c.record_id and c.record_id not in seen_ids:
@@ -370,10 +534,17 @@ class LangChainDiagnosticAgent:
             similar_record_ids=[doc.metadata.get("id", "") for doc in similar_cases],
         )
 
+        # 提取Top1相似工况分数：第一个检索结果的相似度（1 - distance）
+        top1_score = 0.0
+        if len(similar_cases) > 0:
+            top1_score = 1.0 - similar_cases[0].metadata.get("score", 1.0)
+            top1_score = max(0.0, min(1.0, top1_score))
+
         diagnostic_output = DiagnosticOutput(
             report=report,
             database_entry=database_entry,
             reasoning_result=reasoning_result,
+            top1_similar_score=top1_score,
         )
         self._last_diagnostic_output = diagnostic_output
         return diagnostic_output

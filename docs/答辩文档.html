@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>答辩文档.md</title>
+<style>
+:root { --fg:#24292e; --bg:#fff; --border:#e1e4e8; --code-bg:#f6f8fa; --link:#0366d6; }
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  color: var(--fg); background: var(--bg);
+  max-width: 900px; margin: 40px auto; padding: 0 24px;
+  line-height: 1.7; font-size: 16px;
+}
+h1,h2,h3,h4 { border-bottom: 1px solid var(--border); padding-bottom: .3em; margin-top: 1.8em; }
+h1 { font-size: 2em; }
+h2 { font-size: 1.5em; }
+h3 { font-size: 1.25em; }
+code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  background: var(--code-bg); padding: .2em .4em; border-radius: 3px; font-size: 90%;
+}
+pre { background: var(--code-bg); padding: 16px; border-radius: 6px; overflow-x: auto; }
+pre code { background: none; padding: 0; }
+blockquote { border-left: 4px solid var(--border); padding: 0 1em; color: #6a737d; margin: 1em 0; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+th, td { border: 1px solid var(--border); padding: 6px 13px; text-align: left; }
+th { background: var(--code-bg); font-weight: 600; }
+tr:nth-child(even) { background: var(--code-bg); }
+a { color: var(--link); text-decoration: none; }
+hr { border: none; border-top: 2px solid var(--border); margin: 2em 0; }
+img { max-width: 100%; }
+</style>
+</head>
+<body>
+<h1 id="_1">车辆故障诊断智能助手 — 答辩文档</h1>
+<blockquote>
+<p>项目名称：Diagnosis Agent v0.5.0<br />
+技术路线：<strong>LLM + 双路 RAG + 知识图谱闭环</strong></p>
+</blockquote>
+<hr />
+<h2 id="_2">一、解决什么问题？</h2>
+<p>传统车辆故障诊断面临三个痛点，根本上都是"<strong>经验难沉淀，回答靠幻觉</strong>"：</p>
+<ol>
+<li><strong>历史工单散落在 Excel 里</strong>，新人翻几十页才能找到相似案例，效率低</li>
+<li><strong>诊断报告非结构化</strong>，自然语言写出来很难自动入库统计</li>
+<li><strong>LLM 凭空回答容易错</strong>，不知道真实历史案例是什么，说的根因和对策没有工业级证据支撑</li>
+</ol>
+<p>我们的目标：<strong>让大模型基于真实历史案例推理，而不是凭记忆瞎编</strong>。</p>
+<hr />
+<h2 id="llm-rag">二、技术方案：LLM + 双路 RAG</h2>
+<h3 id="21-rag">2.1 标准 RAG 是什么</h3>
+<p>RAG（检索增强生成）三步走：<br />
+1. <strong>检索</strong>：把知识库向量化，用户提问时召回相关片段<br />
+2. <strong>增强</strong>：把召回结果塞进 LLM 上下文<br />
+3. <strong>生成</strong>：LLM 基于真实上下文生成回答</p>
+<p>解决"大模型不知道自己知识边界、输出幻觉"的问题。</p>
+<h3 id="22-rag">2.2 我们为什么是<strong>双路 RAG</strong></h3>
+<p>普通 RAG 只有一条向量检索路径，我们做了两条检索路径互补，精度更高：</p>
+<pre><code>用户问&quot;MCU 报 P1A3E98 爬坡 IGBT 过温&quot;
+      ↓
+┌─────────────────────────────────────┐
+│  路径1：ChromaDB 向量检索            │ 语义模糊匹配现象描述
+│  找&quot;IGBT过温&quot;等相似文本片段          │
+├─────────────────────────────────────┤
+│  路径2：Neo4j 知识图谱结构化召回     │ 按字段精确匹配 DTC码/车型/场景
+│  找 DTC=P1A3E98 的 5 条故障记录     │
+└─────────────────────────────────────┘
+      ↓
+  结果合并去重 → Embedding 精排 → 传给 LLM
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>路径</th>
+<th>数据库</th>
+<th>适配场景</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>语义检索</td>
+<td>ChromaDB（628 条历史工单）</td>
+<td>现象描述模糊、不知道精确 DTC 码时用</td>
+</tr>
+<tr>
+<td>结构化召回</td>
+<td>Neo4j 知识图谱（2036 节点/4356 关系）</td>
+<td>有确定字段（DTC、车型、工况）时用，零误召</td>
+</tr>
+</tbody>
+</table>
+<p>两条路径各自独立匹配，<strong>完全不做字段字符串拼接</strong>，最后由精排层融合排序。不会因为"车型字符串不对就召回不到结果"。</p>
+<hr />
+<h2 id="langchain">三、项目搭建思路：LangChain 架构</h2>
+<h3 id="31-langchain">3.1 为什么选 LangChain</h3>
+<p>LangChain 是大模型应用开发框架，提供 Agent、Retriever、Tool 三大抽象。我们用它而非从零造轮子，核心利用三个能力：</p>
+<table>
+<thead>
+<tr>
+<th>LangChain 能力</th>
+<th>我们怎么用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>create_agent</code></td>
+<td>构建 ReAct Agent，LLM 自主决定调哪个工具、查几次</td>
+</tr>
+<tr>
+<td><code>BaseRetriever</code></td>
+<td>统一检索器接口，Chroma 和 Neo4j 都实现这个接口，Agent 不感知差异</td>
+</tr>
+<tr>
+<td><code>StructuredTool</code></td>
+<td>把检索方法包装成工具，LLM 能按 schema 调用</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32">3.2 分层架构</h3>
+<p>整个项目分六层，每层职责单一，通过标准接口串联：</p>
+<pre><code>┌─────────────────────────────────────────────────────┐
+│  适配层 adapter/                                    │
+│  FastAPI 对接上游平台（异步提交 + 回调）              │
+├─────────────────────────────────────────────────────┤
+│  Agent 层 agent/langchain_agent.py                  │
+│  ReAct 推理循环，编排工具调用                        │
+├─────────────────────────────────────────────────────┤
+│  检索层 retrieval/                                   │
+│  HybridRetriever 编排双路召回 + 精排                  │
+│  ├─ Neo4jFaultRetriever（结构化）                    │
+│  ├─ ChromaVectorRetriever（语义）                   │
+│  └─ SemanticReranker（Embedding 精排）              │
+├─────────────────────────────────────────────────────┤
+│  知识层 knowledge/                                   │
+│  对话抽取实体关系 → 审核 → 写回图谱                   │
+├─────────────────────────────────────────────────────┤
+│  上下文层 agent/context/                             │
+│  三层记忆 + 话题检测 + 异步摘要                       │
+├─────────────────────────────────────────────────────┤
+│  存储层 storage/ + Neo4j + ChromaDB + Redis           │
+└─────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="33-agent">3.3 Agent 工具集</h3>
+<p>Agent 通过 LangChain <code>StructuredTool</code> 暴露 4 个工具，动态注册（Neo4j 不可用时不注册 <code>query_fault_graph</code>，自动降级）：</p>
+<table>
+<thead>
+<tr>
+<th>工具</th>
+<th>触发场景</th>
+<th>数据源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>search_similar_incidents</code></td>
+<td>模糊匹配故障现象</td>
+<td>ChromaDB 向量检索</td>
+</tr>
+<tr>
+<td><code>query_fault_graph</code></td>
+<td>有 DTC/车型等结构化字段</td>
+<td>Neo4j Cypher 查询</td>
+</tr>
+<tr>
+<td><code>get_incident_detail</code></td>
+<td>查看工单详情</td>
+<td>历史记录</td>
+</tr>
+<tr>
+<td><code>convert_working_condition_file</code></td>
+<td>解析工况文件</td>
+<td>文件转换</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_3">四、实际工作流</h2>
+<h3 id="41">4.1 端到端流程</h3>
+<p>一次诊断从用户提问到输出，完整经历以下步骤：</p>
+<pre><code>1. 用户输入
+   &quot;MCU报P1A3E98爬坡IGBT过温，车辆抖动&quot;
+        ↓
+2. 输入解析 + 意图分类
+   提取 entities: {dtc:P1A3E98, project:H37A, ...}
+   判定意图: diagnostic_query（电驱诊断）
+        ↓
+3. 预检索（双路 RAG 召回）
+   ├─ ChromaDB: 找到 5 条&quot;IGBT过温&quot;相似工单
+   └─ Neo4j: 找到 DTC=P1A3E98 的 3 条图谱记录
+   合并 → Embedding 精排 → 取 top_k
+        ↓
+4. ReAct Agent 推理循环
+   Thought: 需要查这个 DTC 的根因
+   Action: query_fault_graph(dtcCode=[&quot;P1A3E98&quot;])
+   Observation: 根因=IGBT散热基板焊接不良
+   Thought: 证据够了，下结论
+   Final: 输出结构化诊断 JSON
+        ↓
+5. 双层输出
+   ├─ 人类可读：Markdown 诊断报告
+   └─ 机器可读：CSV/JSON（含分类、根因、对策、相似工单ID）
+        ↓
+6. 知识沉淀
+   LLM 抽取本轮对话的 实体/关系 → 写入待审核队列
+        ↓
+   完成
+</code></pre>
+<h3 id="42-can">4.2 CAN 报文兜底</h3>
+<p>当预检索结果不足（top1 相似度 &lt; 0.6）时，自动触发 CAN 报文解码，把信号数据补充进 Agent 上下文：</p>
+<pre><code>预检索相似度低 → 解码 CAN 工况文件 → 信号摘要注入 → Agent 基于信号推理
+</code></pre>
+<p>支持 ASC/BLF/MF4/CSV 等多种 CAN 日志格式，结合 DBC 文件解码为物理值。</p>
+<h3 id="43">4.3 三层记忆系统</h3>
+<p>多轮对话的上下文管理，三层存储 + 三步降级，解决长对话 Token 预算问题：</p>
+<table>
+<thead>
+<tr>
+<th>层级</th>
+<th>内容</th>
+<th>存储</th>
+<th>触发降级条件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>热层</td>
+<td>完整消息</td>
+<td>Redis</td>
+<td>超 window_size → 摘要后移温层</td>
+</tr>
+<tr>
+<td>温层</td>
+<td>滚动摘要</td>
+<td>Redis</td>
+<td>摘要超上限 → 合并精简</td>
+</tr>
+<tr>
+<td>冷层</td>
+<td>归档 JSON</td>
+<td>磁盘</td>
+<td>话题切换/会话结束 → 归档</td>
+</tr>
+</tbody>
+</table>
+<p>Redis 不可用时自动降级内存，跨会话可从冷层恢复。</p>
+<hr />
+<h2 id="_4">五、核心创新点</h2>
+<table>
+<thead>
+<tr>
+<th>创新点</th>
+<th>普通 RAG</th>
+<th>我们的方案</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>检索模式</td>
+<td>单路向量</td>
+<td><strong>双路混合 RAG</strong>（Chroma 语义 + Neo4j 结构化）</td>
+</tr>
+<tr>
+<td>LLM 角色</td>
+<td>上下文生成器</td>
+<td><strong>ReAct 推理编排者</strong>（主动调用工具查资料）</td>
+</tr>
+<tr>
+<td>知识库</td>
+<td>静态</td>
+<td><strong>动态闭环</strong>（自动抽取 → 审核 → 写入图谱）</td>
+</tr>
+<tr>
+<td>多轮记忆</td>
+<td>无/简单</td>
+<td><strong>三层分层记忆</strong>（热/温/冷），支持话题切换和跨会话恢复</td>
+</tr>
+<tr>
+<td>兜底机制</td>
+<td>无</td>
+<td><strong>CAN 报文自动解码</strong>，检索不足时注入信号上下文</td>
+</tr>
+<tr>
+<td>输出格式</td>
+<td>纯文本</td>
+<td><strong>双层输出</strong>（人读 Markdown + 机读 CSV/JSON）</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_5">六、效果展示</h2>
+<h3 id="61">6.1 一次完整诊断的输出</h3>
+<p>用户输入"MCU报P1A3E98爬坡IGBT过温"，系统输出：</p>
+<p><strong>人类可读报告（Markdown）</strong>：<br />
+- 故障分类：过温故障<br />
+- 根因分析：IGBT 散热基板焊接不良，动态行驶中螺丝耸动与 PCB 电容接触短路<br />
+- 解决方案：优化作业流程，将螺纹孔深度纳入作业流程管理<br />
+- 相似工单：5 条（含车型、工况、软件版本）<br />
+- 仪表指示灯：电机故障红灯</p>
+<p><strong>机器可读条目（JSON）</strong>：</p>
+<pre><code class="language-json">{
+  &quot;classification&quot;: &quot;过温故障&quot;,
+  &quot;root_cause&quot;: &quot;IGBT散热基板焊接不良&quot;,
+  &quot;solution&quot;: &quot;优化作业流程&quot;,
+  &quot;dtc_code&quot;: &quot;P1A3E98&quot;,
+  &quot;similar_record_ids&quot;: [&quot;REC-1ff8...&quot;, &quot;REC-0ece...&quot;],
+  &quot;confidence&quot;: 0.91
+}
+</code></pre>
+<p>故障分类强制从 10 类固定列表选择（驱动异常/控制异常/超速/高压异常/低压异常/过温/通信/旋变/状态机/油泵），保证分类一致性。</p>
+<h3 id="62">6.2 数据规模与测试</h3>
+<table>
+<thead>
+<tr>
+<th>指标</th>
+<th>数值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>测试用例</td>
+<td>87 个（全部通过，41 秒）</td>
+</tr>
+<tr>
+<td>向量库记录</td>
+<td>628 条历史工单（1024 维 text-embedding-v4）</td>
+</tr>
+<tr>
+<td>知识图谱</td>
+<td>2036 节点 / 4356 关系（8 类实体 / 13 类关系）</td>
+</tr>
+<tr>
+<td>检索策略</td>
+<td>hybrid（Neo4j + Chroma 双路）</td>
+</tr>
+<tr>
+<td>LLM 后端</td>
+<td>通义千问 deepseek-v3.1</td>
+</tr>
+<tr>
+<td>Token 预算</td>
+<td>8000，热层窗口自适应 2~20 轮</td>
+</tr>
+</tbody>
+</table>
+<h3 id="63">6.3 性能指标</h3>
+<ul>
+<li>LLM 推理响应：单轮 0.4~1.0 秒（e2e 实测）</li>
+<li>检索召回：top1 相似度 0.71~0.93 区间符合预期</li>
+<li>温层摘要压缩：合并后总 Token 减少 60%</li>
+</ul>
+<hr />
+<h2 id="_6">七、技术栈</h2>
+<table>
+<thead>
+<tr>
+<th>类别</th>
+<th>技术</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>LLM 框架</strong></td>
+<td>LangChain（create_agent ReAct 模式）</td>
+</tr>
+<tr>
+<td><strong>LLM 后端</strong></td>
+<td>阿里云 DashScope（通义千问，OpenAI 兼容接口）</td>
+</tr>
+<tr>
+<td><strong>知识图谱</strong></td>
+<td>Neo4j 5.22.0（Cypher 查询 + APOC）</td>
+</tr>
+<tr>
+<td><strong>向量数据库</strong></td>
+<td>ChromaDB（cosine 空间，PersistentClient）</td>
+</tr>
+<tr>
+<td><strong>会话存储</strong></td>
+<td>Redis（热层/温层）+ 磁盘（冷层归档）</td>
+</tr>
+<tr>
+<td><strong>Web 框架</strong></td>
+<td>FastAPI + Uvicorn（平台适配层）</td>
+</tr>
+<tr>
+<td><strong>CLI</strong></td>
+<td>Typer + Rich（交互式终端）</td>
+</tr>
+<tr>
+<td><strong>语言</strong></td>
+<td>Python 3.10+</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_7">八、演示命令</h2>
+<pre><code class="language-bash"># 交互式多轮诊断
+python -m diagnosis_agent.cli chat
+
+# 单次文本诊断
+python -m diagnosis_agent.cli diagnose --text &quot;MCU报P1A3E98爬坡IGBT过温&quot;
+
+# 加载 CSV 工单数据（构建 RAG 知识库）
+python -m diagnosis_agent.cli load-data --file data/samples/图谱数据.csv
+
+# 标准接口模式（对接平台）
+python -m diagnosis_agent.cli diagnose --json-input input.json --std-output
+
+# 查看知识库统计
+python -m diagnosis_agent.cli stats
+
+# 测试
+pytest
+</code></pre>
+</body>
+</html>

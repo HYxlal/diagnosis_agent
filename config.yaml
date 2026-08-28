@@ -15,7 +15,7 @@
 #   ✅ qwen3.7-max-preview — 可用，长上下文
 #   ✅ deepseek-v3.1 — 可用
 llm:
-  model: "deepseek-v3.1"
+  model: "qwen3.7-max-preview"
   temperature: 0.3
   max_tokens: 4096
   api_key: "${DASHSCOPE_API_KEY}"
@@ -159,7 +159,7 @@ knowledge:
   persistence_dir: "cache"
   persistence_file: "conversation_knowledge.json"
   # 专门用于知识提取的模型，实测 deepseek-v3.1 结构化提取效果最佳
-  extraction_model: "deepseek-v3.1"
+  extraction_model: "qwen-turbo"
   # 元组解析分隔符配置（不同项目可以自定义，避免输出格式冲突）
   tuple_delimiter: ":"
   record_delimiter: ")"

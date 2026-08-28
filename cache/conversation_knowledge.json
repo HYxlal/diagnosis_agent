@@ -389,336 +389,6 @@
       "review_time": null,
       "review_comment": null,
       "created_at": "2026-08-24T15:28:40.612060"
-    },
-    {
-      "knowledge_id": "6a7ff829-e70b-4d19-951a-8012bad32e2b",
-      "conversation_id": "",
-      "extracted_entities": [
-        {
-          "entity_id": "9686b76d-fe83-407d-95ab-cae192e3dd80",
-          "entity_name": "发动机故障灯亮了",
-          "entity_type": "现象",
-          "description": "仪表指示灯点亮现象"
-        },
-        {
-          "entity_id": "958a71ca-d136-4263-bef9-3dd9bc105956",
-          "entity_name": "怠速不稳",
-          "entity_type": "现象",
-          "description": "车辆怠速时运行不平稳"
-        },
-        {
-          "entity_id": "29eb9089-5e17-490a-b504-0305c63aeb38",
-          "entity_name": "软件死区补偿未开启导致低速控制不稳",
-          "entity_type": "根因",
-          "description": "控制软件功能未启用导致控制不稳定"
-        },
-        {
-          "entity_id": "31efd365-e0bf-4000-85e6-994fa8764463",
-          "entity_name": "电机防抖参数设置不合理",
-          "entity_type": "根因",
-          "description": "防抖参数配置不当"
-        },
-        {
-          "entity_id": "1464321c-49fa-4d3f-99b9-279fc9f7354a",
-          "entity_name": "旋变信号处理精度不足",
-          "entity_type": "根因",
-          "description": "传感器信号处理精度不够"
-        },
-        {
-          "entity_id": "34557997-0c3b-4095-aa80-c93d7234d0f5",
-          "entity_name": "更新电机控制软件开启死区补偿功能",
-          "entity_type": "对策",
-          "description": "软件更新启用补偿功能"
-        },
-        {
-          "entity_id": "0c23381a-eb64-4f5b-9e11-767c487d7098",
-          "entity_name": "重新标定低速防抖参数",
-          "entity_type": "对策",
-          "description": "参数重新校准"
-        },
-        {
-          "entity_id": "f18e1a90-3a71-438a-8052-9595c3fc60ee",
-          "entity_name": "检查旋变传感器信号质量",
-          "entity_type": "对策",
-          "description": "传感器信号检测"
-        },
-        {
-          "entity_id": "a45e8000-f097-402d-a801-935368c4fdd0",
-          "entity_name": "进行低速工况测试验证",
-          "entity_type": "对策",
-          "description": "测试验证解决方案"
-        },
-        {
-          "entity_id": "81b31dbf-4500-4f6a-8d6f-7dd0338f3460",
-          "entity_name": "车辆怠速工况",
-          "entity_type": "故障场景",
-          "description": "特定运行工况"
-        }
-      ],
-      "extracted_relationships": [
-        {
-          "source_id": "软件死区补偿未开启导致低速控制不稳",
-          "target_id": "怠速不稳",
-          "relation_type": "导致",
-          "description": "参数问题导致怠速不稳定",
-          "weight": 0.8
-        },
-        {
-          "source_id": "电机防抖参数设置不合理",
-          "target_id": "怠速不稳",
-          "relation_type": "导致",
-          "description": "参数设置不当导致抖动",
-          "weight": 0.7
-        },
-        {
-          "source_id": "旋变信号处理精度不足",
-          "target_id": "怠速不稳",
-          "relation_type": "导致",
-          "description": "信号精度不足影响控制稳定性",
-          "weight": 0.6
-        },
-        {
-          "source_id": "软件死区补偿未开启导致低速控制不稳",
-          "target_id": "更新电机控制软件开启死区补偿功能",
-          "relation_type": "对应对策",
-          "description": "软件更新解决补偿问题",
-          "weight": 0.9
-        },
-        {
-          "source_id": "电机防抖参数设置不合理",
-          "target_id": "重新标定低速防抖参数",
-          "relation_type": "对应对策",
-          "description": "参数重新标定解决设置问题",
-          "weight": 0.8
-        },
-        {
-          "source_id": "旋变信号处理精度不足",
-          "target_id": "检查旋变传感器信号质量",
-          "relation_type": "对应对策",
-          "description": "检查信号质量解决精度问题",
-          "weight": 0.7
-        },
-        {
-          "source_id": "更新电机控制软件开启死区补偿功能",
-          "target_id": "怠速不稳",
-          "relation_type": "适用于",
-          "description": "软件更新适用于怠速不稳问题",
-          "weight": 0.8
-        },
-        {
-          "source_id": "重新标定低速防抖参数",
-          "target_id": "怠速不稳",
-          "relation_type": "适用于",
-          "description": "参数标定适用于怠速抖动",
-          "weight": 0.7
-        },
-        {
-          "source_id": "怠速不稳",
-          "target_id": "车辆怠速工况",
-          "relation_type": "发生于",
-          "description": "现象发生在怠速工况",
-          "weight": 0.9
-        },
-        {
-          "source_id": "软件死区补偿未开启导致低速控制不稳",
-          "target_id": "电机防抖参数设置不合理",
-          "relation_type": "并存",
-          "description": "多个控制参数问题同时存在",
-          "weight": 0.6
-        }
-      ],
-      "conversation_context": "助手: 让我先分析预检索结果与当前故障的关联性。\n\n当前故障描述是\"发动机故障灯亮了，怠速不稳\"，这是一个比较通用的描述。从预检索结果来看：\n\n1. **工单1**（相似度0.67）：虽然提到了动力系统故障灯点亮，但主要是多个故障灯同时点亮的情况，且根本原因是旋变故障相关的硬件问题，与怠速不稳的直接关联性较弱。\n\n2. **工单2-5**：这些工单主要涉及通讯超时、挂挡故障、抖动等问题，与\"发动机故障灯亮+怠速不稳\"的核心症状匹配度不高。\n\n预检索结果的相似度都在0.63-0.67之间，说明有一定的相关性，但可能不够精准。我需要进一步检索更相关的历史工单。\n助手: 让我再检索一下更具体的怠速不稳相关故障：\n助手: 现在让我查看一下预检索中提到的工单4的详细情况，因为它提到了怠速抖动的问题\n助手: 基于检索到的历史工单分析，我来给出诊断结论：\n\n## 诊断结论\n\n根据故障描述\"发动机故障灯亮了，怠速不稳\"以及检索到的历史工单分析，该故障属于**控制异常故障**。从多个相似案例来看，怠速不稳通常与电机控制系统相关，特别是低速控制算法和防抖参数设置。\n\n**根因分析**：\n1. **软件控制参数问题**：多个历史工单显示怠速抖动主要原因是软件死区补偿未开启或防抖参数设置不合理，导致低速控制不稳定\n2. **电机控制算法缺陷**：在低速段（特别是怠速工况），电机扭矩控制精度不足，容易产生抖动现象\n3. **信号处理问题**：旋变信号处理或位置传感器精度不足，影响电机控制的稳定性\n\n**解决方案**：\n1. 检查并更新电机控制软件，确保死区补偿功能正常开启\n2. 重新标定低速防抖参数，优化怠速控制算法\n3. 检查旋变传感器信号质量，确保位置检测精度\n4. 进行低速工况测试验证，确认抖动问题是否解决\n\n**风险提示**：\n该故障属于中风险（V2），虽然不会立即导致车辆无法行驶，但长期存在会影响驾驶舒适性和电机寿命。建议及时处理，避免问题恶化。\n\n**维护建议**：\n定期检查电机控制系统软件版本，确保使用最新的稳定版本。在车辆维护时注意检查低速工况下的运行平稳性。\n\n```json\n{\n  \"fault_root_cause\": [\"软件死区补偿未开启导致低速控制不稳\", \"电机防抖参数设置不合理\", \"旋变信号处理精度不足\"],\n  \"fault_trigger_condition\": \"车辆怠速工况，特别是在D/R档轻制动状态下\",\n  \"classification\": \"控制异常故障\",\n  \"solution\": [\"更新电机控制软件开启死区补偿功能\", \"重新标定低速防抖参数\", \"检查旋变传感器信号质量\", \"进行低速工况测试验证\"],\n  \"risk_warning\": \"V2\",\n  \"maintenance_suggestions\": \"定期检查电机控制系统软件版本，确保低速工况运行平稳性\",\n  \"confidence\": 0.75,\n  \"reasoning_narrative\": \"基于检索到的多个历史工单分析，特别是REC-f2a4bf6cb41c工单中明确的'软件死区补偿未开启，低速控制不稳'根因，结合其他怠速抖动案例都指向电机控制算法问题。虽然当前故障描述中提到'发动机故障灯'，但在电驱系统中这通常对应电机故障指示灯。多个相似案例显示怠速不稳主要与低速控制参数和算法相关，而非硬件故障。考虑到故障现象的普遍性和历史解决方案的有效性，判断为控制异常故障。\"\n}\n```",
-      "status": "pending",
-      "reviewer": null,
-      "review_time": null,
-      "review_comment": null,
-      "created_at": "2026-08-25T15:17:31.904749"
-    },
-    {
-      "knowledge_id": "8e657660-1e51-45df-8713-00496ece5511",
-      "conversation_id": "test-vin-fix2",
-      "extracted_entities": [
-        {
-          "entity_id": "3bc8d764-6a3e-4d23-a759-11e49e644552",
-          "entity_name": "发动机故障灯亮了",
-          "entity_type": "现象",
-          "description": "仪表指示灯点亮"
-        },
-        {
-          "entity_id": "fffe1a31-8488-4fc5-93f3-e5d10d74c30f",
-          "entity_name": "怠速不稳",
-          "entity_type": "现象",
-          "description": "车辆怠速时转速不稳定"
-        },
-        {
-          "entity_id": "87677a03-9253-4a90-9560-0d5016ba33d0",
-          "entity_name": "软件防抖参数标定不当",
-          "entity_type": "根因",
-          "description": "控制系统参数设置问题"
-        },
-        {
-          "entity_id": "57cfe395-b31f-4fd4-b112-c6ab750f5020",
-          "entity_name": "死区补偿功能未开启",
-          "entity_type": "根因",
-          "description": "控制功能未激活"
-        },
-        {
-          "entity_id": "ac084e6b-c0a1-44f3-b9e3-f3d62a8dbd81",
-          "entity_name": "硬件连接松动（母线端子等）",
-          "entity_type": "根因",
-          "description": "机械连接问题"
-        },
-        {
-          "entity_id": "e9f81ffe-e06c-4816-b4b7-6b6b19da733d",
-          "entity_name": "读取DTC故障码确定具体故障类型",
-          "entity_type": "对策",
-          "description": "诊断步骤"
-        },
-        {
-          "entity_id": "f37b6ab2-74f8-4aec-9b93-9218419782e4",
-          "entity_name": "检查MCU硬件连接状态",
-          "entity_type": "对策",
-          "description": "硬件检查"
-        },
-        {
-          "entity_id": "d1803734-55f7-40f0-94a9-962ffd305ed4",
-          "entity_name": "验证软件防抖参数设置",
-          "entity_type": "对策",
-          "description": "软件验证"
-        },
-        {
-          "entity_id": "68db4457-a948-4aa3-b175-01b66a0716b2",
-          "entity_name": "开启死区补偿功能",
-          "entity_type": "对策",
-          "description": "功能激活"
-        },
-        {
-          "entity_id": "d1d5441f-b1e9-4ed0-ac68-4f653b280895",
-          "entity_name": "车辆怠速工况",
-          "entity_type": "故障场景",
-          "description": "特定运行状态"
-        }
-      ],
-      "extracted_relationships": [
-        {
-          "source_id": "软件防抖参数标定不当",
-          "target_id": "发动机故障灯亮了",
-          "relation_type": "导致",
-          "description": "参数问题导致指示灯点亮",
-          "weight": 0.7
-        },
-        {
-          "source_id": "软件防抖参数标定不当",
-          "target_id": "怠速不稳",
-          "relation_type": "导致",
-          "description": "参数问题导致转速不稳定",
-          "weight": 0.8
-        },
-        {
-          "source_id": "死区补偿功能未开启",
-          "target_id": "发动机故障灯亮了",
-          "relation_type": "导致",
-          "description": "功能未开启导致指示灯点亮",
-          "weight": 0.6
-        },
-        {
-          "source_id": "死区补偿功能未开启",
-          "target_id": "怠速不稳",
-          "relation_type": "导致",
-          "description": "功能未开启导致转速不稳定",
-          "weight": 0.7
-        },
-        {
-          "source_id": "硬件连接松动（母线端子等）",
-          "target_id": "发动机故障灯亮了",
-          "relation_type": "导致",
-          "description": "连接问题导致指示灯点亮",
-          "weight": 0.7
-        },
-        {
-          "source_id": "硬件连接松动（母线端子等）",
-          "target_id": "怠速不稳",
-          "relation_type": "导致",
-          "description": "连接问题导致转速不稳定",
-          "weight": 0.8
-        },
-        {
-          "source_id": "软件防抖参数标定不当",
-          "target_id": "验证软件防抖参数设置",
-          "relation_type": "对应对策",
-          "description": "参数问题对应验证措施",
-          "weight": 0.9
-        },
-        {
-          "source_id": "死区补偿功能未开启",
-          "target_id": "开启死区补偿功能",
-          "relation_type": "对应对策",
-          "description": "功能未开启对应激活措施",
-          "weight": 0.9
-        },
-        {
-          "source_id": "硬件连接松动（母线端子等）",
-          "target_id": "检查MCU硬件连接状态",
-          "relation_type": "对应对策",
-          "description": "连接问题对应检查措施",
-          "weight": 0.9
-        },
-        {
-          "source_id": "验证软件防抖参数设置",
-          "target_id": "怠速不稳",
-          "relation_type": "适用于",
-          "description": "参数验证适用于转速问题",
-          "weight": 0.8
-        },
-        {
-          "source_id": "开启死区补偿功能",
-          "target_id": "怠速不稳",
-          "relation_type": "适用于",
-          "description": "功能激活适用于转速问题",
-          "weight": 0.8
-        },
-        {
-          "source_id": "检查MCU硬件连接状态",
-          "target_id": "发动机故障灯亮了",
-          "relation_type": "适用于",
-          "description": "硬件检查适用于指示灯问题",
-          "weight": 0.7
-        },
-        {
-          "source_id": "发动机故障灯亮了",
-          "target_id": "车辆怠速工况",
-          "relation_type": "发生于",
-          "description": "指示灯问题发生在怠速状态",
-          "weight": 0.8
-        },
-        {
-          "source_id": "怠速不稳",
-          "target_id": "车辆怠速工况",
-          "relation_type": "发生于",
-          "description": "转速问题发生在怠速状态",
-          "weight": 0.9
-        },
-        {
-          "source_id": "软件防抖参数标定不当",
-          "target_id": "死区补偿功能未开启",
-          "relation_type": "并存",
-          "description": "两个软件问题可能同时存在",
-          "weight": 0.6
-        },
-        {
-          "source_id": "验证软件防抖参数设置",
-          "target_id": "开启死区补偿功能",
-          "relation_type": "互斥",
-          "description": "两种软件处理措施可能互斥",
-          "weight": 0.5
-        }
-      ],
-      "conversation_context": "助手: 让我再尝试更精确地检索与发动机故障灯相关的怠速问题：\n助手: 让我查看工单REC-4e3808b93919的详细信息，这个工单最接近当前故障现象\n助手: 现在让我查询故障知识图谱，寻找更精确的诊断\n助手: ## 诊断结论\n\n基于对历史工单和故障知识图谱的分析，当前\"发动机故障灯亮了，怠速不稳\"的故障现象主要指向**控制异常故障**。从检索到的相似案例来看，这种组合故障通常由以下几个原因导致：\n\n**根因分析：**\n1. **软件控制参数问题** - 防抖参数标定不当或死区补偿未开启，导致低速控制不稳定，表现为怠速抖动\n2. **硬件连接问题** - 母线端子螺钉未打紧等机械连接问题，影响电力传输稳定性\n3. **传感器故障** - 旋变传感器端子压接不良导致信号异常，引发故障灯点亮\n\n**解决方案：**\n1. 首先读取DTC故障码，确定具体的故障类型\n2. 检查MCU硬件连接，特别是母线端子和传感器连接\n3. 验证软件版本，确认防抖参数和死区补偿设置\n4. 如为硬件问题，更换相关部件；如为软件问题，更新控制参数\n\n**风险提示：**\n此故障属于中风险（V2），虽然不会立即导致车辆完全瘫痪，但会影响驾驶平顺性和安全性。怠速不稳可能导致车辆在低速行驶时出现意外抖动，建议尽快检修。\n\n```json\n{\n  \"fault_root_cause\": [\"软件防抖参数标定不当\", \"死区补偿功能未开启\", \"硬件连接松动（母线端子等）\"],\n  \"fault_trigger_condition\": \"车辆怠速工况，特别是D/R档轻制动时\",\n  \"classification\": \"控制异常故障\",\n  \"solution\": [\"读取DTC故障码确定具体故障类型\", \"检查MCU硬件连接状态\", \"验证软件防抖参数设置\", \"开启死区补偿功能\", \"必要时更新软件或更换硬件\"],\n  \"risk_warning\": \"V2（中风险）\",\n  \"maintenance_suggestions\": \"定期检查电驱系统软件版本，确保控制参数优化；注意车辆低速行驶平顺性表现，及时发现异常\",\n  \"confidence\": 0.75,\n  \"reasoning_narrative\": \"通过分析多个相似历史工单，发现'动力系统故障灯+怠速不稳'的组合故障主要源于控制系统的软件参数问题。工单REC-f2a4bf6cb41c显示软件死区补偿未开启导致低速控制不稳，工单REC-30f818750b49表明防抖参数标定偏大引起转速震荡。同时，工单REC-4e3808b93919显示硬件连接问题（母线端子螺钉未打紧）也会导致类似现象。结合故障知识图谱中关于动力系统故障灯的相关案例，判断此故障属于控制异常范畴，需要从软件参数优化和硬件连接检查两方面入手解决。\"\n}\n```",
-      "status": "pending",
-      "reviewer": null,
-      "review_time": null,
-      "review_comment": null,
-      "created_at": "2026-08-25T15:20:34.706862"
     }
   ],
   "processed_knowledge": {
@@ -2959,10 +2629,10 @@
         }
       ],
       "conversation_context": "助手: 让我先分析预检索结果与当前故障的关联性。\n\n当前故障描述是\"发动机故障灯亮了，怠速不稳\"，这是一个比较通用的描述。从预检索结果来看：\n\n1. **工单1**（相似度0.67）：虽然提到了动力系统故障灯点亮，但主要是多个故障灯同时点亮的情况，且根本原因是旋变故障相关的硬件问题，与怠速不稳的直接关联性较弱。\n\n2. **工单2-5**：这些工单主要涉及通讯超时、挂挡故障、抖动等问题，与\"发动机故障灯亮+怠速不稳\"的核心症状匹配度不高。\n\n预检索结果的相似度都在0.63-0.67之间，说明有一定的相关性，但可能不够精准。我需要进一步检索更相关的历史工单。\n助手: 让我再检索一下更具体的怠速不稳相关故障：\n助手: 现在让我查看一下预检索中提到的工单4的详细情况，因为它提到了怠速抖动的问题\n助手: 基于检索到的历史工单分析，我来给出诊断结论：\n\n## 诊断结论\n\n根据故障描述\"发动机故障灯亮了，怠速不稳\"以及检索到的历史工单分析，该故障属于**控制异常故障**。从多个相似案例来看，怠速不稳通常与电机控制系统相关，特别是低速控制算法和防抖参数设置。\n\n**根因分析**：\n1. **软件控制参数问题**：多个历史工单显示怠速抖动主要原因是软件死区补偿未开启或防抖参数设置不合理，导致低速控制不稳定\n2. **电机控制算法缺陷**：在低速段（特别是怠速工况），电机扭矩控制精度不足，容易产生抖动现象\n3. **信号处理问题**：旋变信号处理或位置传感器精度不足，影响电机控制的稳定性\n\n**解决方案**：\n1. 检查并更新电机控制软件，确保死区补偿功能正常开启\n2. 重新标定低速防抖参数，优化怠速控制算法\n3. 检查旋变传感器信号质量，确保位置检测精度\n4. 进行低速工况测试验证，确认抖动问题是否解决\n\n**风险提示**：\n该故障属于中风险（V2），虽然不会立即导致车辆无法行驶，但长期存在会影响驾驶舒适性和电机寿命。建议及时处理，避免问题恶化。\n\n**维护建议**：\n定期检查电机控制系统软件版本，确保使用最新的稳定版本。在车辆维护时注意检查低速工况下的运行平稳性。\n\n```json\n{\n  \"fault_root_cause\": [\"软件死区补偿未开启导致低速控制不稳\", \"电机防抖参数设置不合理\", \"旋变信号处理精度不足\"],\n  \"fault_trigger_condition\": \"车辆怠速工况，特别是在D/R档轻制动状态下\",\n  \"classification\": \"控制异常故障\",\n  \"solution\": [\"更新电机控制软件开启死区补偿功能\", \"重新标定低速防抖参数\", \"检查旋变传感器信号质量\", \"进行低速工况测试验证\"],\n  \"risk_warning\": \"V2\",\n  \"maintenance_suggestions\": \"定期检查电机控制系统软件版本，确保低速工况运行平稳性\",\n  \"confidence\": 0.75,\n  \"reasoning_narrative\": \"基于检索到的多个历史工单分析，特别是REC-f2a4bf6cb41c工单中明确的'软件死区补偿未开启，低速控制不稳'根因，结合其他怠速抖动案例都指向电机控制算法问题。虽然当前故障描述中提到'发动机故障灯'，但在电驱系统中这通常对应电机故障指示灯。多个相似案例显示怠速不稳主要与低速控制参数和算法相关，而非硬件故障。考虑到故障现象的普遍性和历史解决方案的有效性，判断为控制异常故障。\"\n}\n```",
-      "status": "pending",
-      "reviewer": null,
-      "review_time": null,
-      "review_comment": null,
+      "status": "approved",
+      "reviewer": "admin",
+      "review_time": "2026-08-28T15:53:25.314920",
+      "review_comment": "",
       "created_at": "2026-08-25T15:17:31.904749"
     },
     "8e657660-1e51-45df-8713-00496ece5511": {
@@ -3145,22 +2815,315 @@
         }
       ],
       "conversation_context": "助手: 让我再尝试更精确地检索与发动机故障灯相关的怠速问题：\n助手: 让我查看工单REC-4e3808b93919的详细信息，这个工单最接近当前故障现象\n助手: 现在让我查询故障知识图谱，寻找更精确的诊断\n助手: ## 诊断结论\n\n基于对历史工单和故障知识图谱的分析，当前\"发动机故障灯亮了，怠速不稳\"的故障现象主要指向**控制异常故障**。从检索到的相似案例来看，这种组合故障通常由以下几个原因导致：\n\n**根因分析：**\n1. **软件控制参数问题** - 防抖参数标定不当或死区补偿未开启，导致低速控制不稳定，表现为怠速抖动\n2. **硬件连接问题** - 母线端子螺钉未打紧等机械连接问题，影响电力传输稳定性\n3. **传感器故障** - 旋变传感器端子压接不良导致信号异常，引发故障灯点亮\n\n**解决方案：**\n1. 首先读取DTC故障码，确定具体的故障类型\n2. 检查MCU硬件连接，特别是母线端子和传感器连接\n3. 验证软件版本，确认防抖参数和死区补偿设置\n4. 如为硬件问题，更换相关部件；如为软件问题，更新控制参数\n\n**风险提示：**\n此故障属于中风险（V2），虽然不会立即导致车辆完全瘫痪，但会影响驾驶平顺性和安全性。怠速不稳可能导致车辆在低速行驶时出现意外抖动，建议尽快检修。\n\n```json\n{\n  \"fault_root_cause\": [\"软件防抖参数标定不当\", \"死区补偿功能未开启\", \"硬件连接松动（母线端子等）\"],\n  \"fault_trigger_condition\": \"车辆怠速工况，特别是D/R档轻制动时\",\n  \"classification\": \"控制异常故障\",\n  \"solution\": [\"读取DTC故障码确定具体故障类型\", \"检查MCU硬件连接状态\", \"验证软件防抖参数设置\", \"开启死区补偿功能\", \"必要时更新软件或更换硬件\"],\n  \"risk_warning\": \"V2（中风险）\",\n  \"maintenance_suggestions\": \"定期检查电驱系统软件版本，确保控制参数优化；注意车辆低速行驶平顺性表现，及时发现异常\",\n  \"confidence\": 0.75,\n  \"reasoning_narrative\": \"通过分析多个相似历史工单，发现'动力系统故障灯+怠速不稳'的组合故障主要源于控制系统的软件参数问题。工单REC-f2a4bf6cb41c显示软件死区补偿未开启导致低速控制不稳，工单REC-30f818750b49表明防抖参数标定偏大引起转速震荡。同时，工单REC-4e3808b93919显示硬件连接问题（母线端子螺钉未打紧）也会导致类似现象。结合故障知识图谱中关于动力系统故障灯的相关案例，判断此故障属于控制异常范畴，需要从软件参数优化和硬件连接检查两方面入手解决。\"\n}\n```",
-      "status": "pending",
-      "reviewer": null,
-      "review_time": null,
-      "review_comment": null,
+      "status": "approved",
+      "reviewer": "admin",
+      "review_time": "2026-08-28T15:53:22.362358",
+      "review_comment": "",
       "created_at": "2026-08-25T15:20:34.706862"
+    },
+    "395e2540-8a62-4461-92d7-a2349bcb366b": {
+      "knowledge_id": "395e2540-8a62-4461-92d7-a2349bcb366b",
+      "conversation_id": "chat-2f8da990",
+      "extracted_entities": [
+        {
+          "entity_id": "5f6ce34c-0246-4b0e-a6cb-03ef127107bc",
+          "entity_name": "行驶时顿挫",
+          "entity_type": "现象",
+          "description": "车辆在行驶过程中出现的顿挫感"
+        },
+        {
+          "entity_id": "4122dfde-2935-4f9e-ac4a-9bcbed538c6c",
+          "entity_name": "Rolling Counter校验过严",
+          "entity_type": "根因",
+          "description": "导致PDCM报文卡滞并触发E2E故障的硬件或软件逻辑问题"
+        },
+        {
+          "entity_id": "d0a3c31e-142d-4963-9cf6-f9ca5a559263",
+          "entity_name": "PDCM报文卡滞报E2E故障",
+          "entity_type": "故障DTC",
+          "description": "与电驱系统通信相关的错误代码"
+        },
+        {
+          "entity_id": "3faa9d3d-7d35-4301-ac23-75af9b1b4ea1",
+          "entity_name": "电机故障黄灯",
+          "entity_type": "仪表指示灯",
+          "description": "车辆仪表盘上提示电机故障的黄色指示灯"
+        },
+        {
+          "entity_id": "19cf2d6f-facb-436d-b790-296d51d77bb6",
+          "entity_name": "U163083",
+          "entity_type": "故障DTC",
+          "description": "与电驱系统通信相关的错误代码"
+        },
+        {
+          "entity_id": "e348a874-1261-4426-a364-78270e98f380",
+          "entity_name": "平稳驾驶",
+          "entity_type": "故障场景",
+          "description": "车辆在平稳驾驶状态下发生的故障"
+        },
+        {
+          "entity_id": "f5f5f6c5-7929-4ea9-a5e9-d0c746c94ff9",
+          "entity_name": "两驱切四驱靠齿策略执行过程中使能条件不满足退出执行",
+          "entity_type": "根因",
+          "description": "导致动力中断和顿挫的控制逻辑缺陷"
+        },
+        {
+          "entity_id": "881e8f58-f037-41b2-9333-9784d0f03d03",
+          "entity_name": "软件修正",
+          "entity_type": "对策",
+          "description": "针对控制逻辑缺陷的解决方案"
+        },
+        {
+          "entity_id": "b16fc078-a788-4ebb-89b9-d2a10055ffb6",
+          "entity_name": "H170YA",
+          "entity_type": "电驱代号",
+          "description": "特定电驱系统的型号"
+        },
+        {
+          "entity_id": "6a791a65-815b-4d8a-8975-c39ee68ea872",
+          "entity_name": "试验车",
+          "entity_type": "车辆类型",
+          "description": "用于测试的车辆类型"
+        },
+        {
+          "entity_id": "b5b363e5-5550-41c1-9832-86dc6d721c1f",
+          "entity_name": "旋变励磁芯片温升优化前的硬件状态",
+          "entity_type": "根因",
+          "description": "导致控制器温度过高、励磁芯片过温的硬件状态"
+        },
+        {
+          "entity_id": "e048035f-351e-4002-a95d-e3e3aba6a671",
+          "entity_name": "控制器温度过高",
+          "entity_type": "现象",
+          "description": "控制器温度异常升高"
+        },
+        {
+          "entity_id": "40328a33-e44b-421f-ac6c-7337d2377432",
+          "entity_name": "励磁芯片过温",
+          "entity_type": "根因",
+          "description": "导致旋变信号失真的硬件问题"
+        },
+        {
+          "entity_id": "8c54576e-d135-48d9-90df-91cf34e43007",
+          "entity_name": "MC阶段软件诊断不成熟",
+          "entity_type": "根因",
+          "description": "导致无故障报出的软件问题"
+        },
+        {
+          "entity_id": "6ea6e142-8cd9-4808-a641-fecef52d162f",
+          "entity_name": "前电机执行扭矩出现跳变",
+          "entity_type": "现象",
+          "description": "前电机输出扭矩异常波动"
+        },
+        {
+          "entity_id": "82234ca1-f087-4556-b471-b21758bcb0df",
+          "entity_name": "MCUF反馈的最大可用驱动扭矩跳变",
+          "entity_type": "现象",
+          "description": "MCUF反馈的扭矩值发生突变"
+        },
+        {
+          "entity_id": "5a863fd8-6d5b-43a0-8365-8aabbd145a50",
+          "entity_name": "前电机最大可用驱动扭矩跳变",
+          "entity_type": "现象",
+          "description": "前电机最大可用驱动扭矩发生突变"
+        },
+        {
+          "entity_id": "08316dbc-81fb-4354-b396-8bdc8e75d0e5",
+          "entity_name": "最大可用发电功率进行查表",
+          "entity_type": "根因",
+          "description": "导致扭矩计算错误的软件逻辑"
+        },
+        {
+          "entity_id": "924f0bb6-3f71-4ca8-84d6-9c8dc9bd4279",
+          "entity_name": "最大可用驱动功率进行查表",
+          "entity_type": "对策",
+          "description": "修正后的扭矩查表逻辑"
+        },
+        {
+          "entity_id": "e87ee2db-97cb-482a-be15-790b69d2ac2e",
+          "entity_name": "H56D-EV800V",
+          "entity_type": "车辆类型",
+          "description": "特定车型名称"
+        },
+        {
+          "entity_id": "d9b7a3af-2448-4fa1-b85b-318b9b6aa010",
+          "entity_name": "R档全油门起步",
+          "entity_type": "故障场景",
+          "description": "车辆在R档全油门起步时发生的故障"
+        },
+        {
+          "entity_id": "38241e14-e7ed-4cc6-9580-20a0d8b5bd4b",
+          "entity_name": "激烈驾驶",
+          "entity_type": "故障场景",
+          "description": "车辆在激烈驾驶状态下发生的故障"
+        }
+      ],
+      "extracted_relationships": [
+        {
+          "source_id": "行驶时顿挫",
+          "target_id": "Rolling Counter校验过严",
+          "relation_type": "由...引起",
+          "description": "Rolling Counter校验过严是导致行驶时顿挫的原因之一",
+          "weight": 0.8
+        },
+        {
+          "source_id": "行驶时顿挫",
+          "target_id": "两驱切四驱靠齿策略执行过程中使能条件不满足退出执行",
+          "relation_type": "由...引起",
+          "description": "两驱切四驱靠齿策略执行过程中使能条件不满足退出执行是导致行驶时顿挫的原因之一",
+          "weight": 0.75
+        },
+        {
+          "source_id": "行驶时顿挫",
+          "target_id": "前电机执行扭矩出现跳变",
+          "relation_type": "由...引起",
+          "description": "前电机执行扭矩出现跳变是导致行驶时顿挫的原因之一",
+          "weight": 0.7
+        },
+        {
+          "source_id": "行驶时顿挫",
+          "target_id": "旋变励磁芯片温升优化前的硬件状态",
+          "relation_type": "由...引起",
+          "description": "旋变励磁芯片温升优化前的硬件状态是导致行驶时顿挫的原因之一",
+          "weight": 0.7
+        },
+        {
+          "source_id": "Rolling Counter校验过严",
+          "target_id": "PDCM报文卡滞报E2E故障",
+          "relation_type": "导致",
+          "description": "Rolling Counter校验过严导致PDCM报文卡滞并触发E2E故障",
+          "weight": 0.8
+        },
+        {
+          "source_id": "两驱切四驱靠齿策略执行过程中使能条件不满足退出执行",
+          "target_id": "前电机执行扭矩出现跳变",
+          "relation_type": "导致",
+          "description": "两驱切四驱靠齿策略执行过程中使能条件不满足退出执行导致前电机执行扭矩出现跳变",
+          "weight": 0.75
+        },
+        {
+          "source_id": "前电机执行扭矩出现跳变",
+          "target_id": "行驶时顿挫",
+          "relation_type": "导致",
+          "description": "前电机执行扭矩出现跳变导致行驶时顿挫",
+          "weight": 0.7
+        },
+        {
+          "source_id": "旋变励磁芯片温升优化前的硬件状态",
+          "target_id": "控制器温度过高",
+          "relation_type": "导致",
+          "description": "旋变励磁芯片温升优化前的硬件状态导致控制器温度过高",
+          "weight": 0.7
+        },
+        {
+          "source_id": "控制器温度过高",
+          "target_id": "励磁芯片过温",
+          "relation_type": "导致",
+          "description": "控制器温度过高导致励磁芯片过温",
+          "weight": 0.7
+        },
+        {
+          "source_id": "MC阶段软件诊断不成熟",
+          "target_id": "前电机最大可用驱动扭矩跳变",
+          "relation_type": "导致",
+          "description": "MC阶段软件诊断不成熟导致前电机最大可用驱动扭矩跳变",
+          "weight": 0.7
+        },
+        {
+          "source_id": "前电机最大可用驱动扭矩跳变",
+          "target_id": "MCUF反馈的最大可用驱动扭矩跳变",
+          "relation_type": "导致",
+          "description": "前电机最大可用驱动扭矩跳变导致MCUF反馈的最大可用驱动扭矩跳变",
+          "weight": 0.7
+        },
+        {
+          "source_id": "MCUF反馈的最大可用驱动扭矩跳变",
+          "target_id": "前电机执行扭矩出现跳变",
+          "relation_type": "导致",
+          "description": "MCUF反馈的最大可用驱动扭矩跳变导致前电机执行扭矩出现跳变",
+          "weight": 0.7
+        },
+        {
+          "source_id": "前电机执行扭矩出现跳变",
+          "target_id": "行驶时顿挫",
+          "relation_type": "导致",
+          "description": "前电机执行扭矩出现跳变导致行驶时顿挫",
+          "weight": 0.7
+        },
+        {
+          "source_id": "行驶时顿挫",
+          "target_id": "平稳驾驶",
+          "relation_type": "发生于",
+          "description": "行驶时顿挫发生在平稳驾驶场景中",
+          "weight": 0.7
+        },
+        {
+          "source_id": "行驶时顿挫",
+          "target_id": "激烈驾驶",
+          "relation_type": "发生于",
+          "description": "行驶时顿挫发生在激烈驾驶场景中",
+          "weight": 0.7
+        },
+        {
+          "source_id": "行驶时顿挫",
+          "target_id": "U163083",
+          "relation_type": "关联DTC",
+          "description": "行驶时顿挫与故障码U163083相关",
+          "weight": 0.7
+        },
+        {
+          "source_id": "行驶时顿挫",
+          "target_id": "电机故障黄灯",
+          "relation_type": "亮起",
+          "description": "行驶时顿挫时，电机故障黄灯亮起",
+          "weight": 0.7
+        },
+        {
+          "source_id": "H170YA",
+          "target_id": "试验车",
+          "relation_type": "配备",
+          "description": "H170YA电驱代号配备于试验车",
+          "weight": 0.7
+        },
+        {
+          "source_id": "行驶时顿挫",
+          "target_id": "H170YA",
+          "relation_type": "出现于",
+          "description": "行驶时顿挫出现在H170YA电驱代号的车辆中",
+          "weight": 0.7
+        },
+        {
+          "source_id": "两驱切四驱靠齿策略执行过程中使能条件不满足退出执行",
+          "target_id": "软件修正",
+          "relation_type": "应对策",
+          "description": "软件修正是针对两驱切四驱靠齿策略执行过程中使能条件不满足退出执行的对策",
+          "weight": 0.7
+        },
+        {
+          "source_id": "最大可用发电功率进行查表",
+          "target_id": "最大可用驱动功率进行查表",
+          "relation_type": "互斥",
+          "description": "最大可用发电功率进行查表与最大可用驱动功率进行查表为互斥的查表逻辑",
+          "weight": 0.7
+        }
+      ],
+      "conversation_context": "用户: ## 当前故障描述\n\n行驶时顿挫\n\n## 预检索结果\n（检索词: \"行驶时顿挫\"）\n\n**工单 1** (ID: REC-6125b7aa62ad, 相似度: 0.75)\n  - 问题描述: 车辆行驶时有顿挫感\n  - 根本原因: Rolling Counter校验过严，PDCM报文卡滞报E2E故障\n  - 对策: nan\n  - 驱动代码: L160A\n  - 车型: 试验车\n  - 仪表盘指示: 电机故障黄灯\n  - DTC码: U163083\n  - 故障场景: 平稳驾驶\n\n**工单 2** (ID: REC-a34220b11a03, 相似度: 0.74)\n  - 问题描述: 车辆起步时顿挫。H56E-304#，20260420，6:47，经济+纯电，车辆起步时，中/重油门起步，会顿挫一下不平顺，其他驾驶模式正常。\n  - 根本原因: nan\n  - 对策: nan\n  - 驱动代码: H170YB\n  - 车型: nan\n  - 仪表盘指示: nan\n  - DTC码: nan\n  - 故障场景: 无法确认故障工况\n\n**工单 3** (ID: REC-766ab447de77, 相似度: 0.72)\n  - 问题描述: 大油门起步顿挫\n  - 根本原因: 原软件在两驱切四驱靠齿策略执行过程中使能条件不满足退出执行，导致有概率顿挫\n  - 对策: 软件修正\n  - 驱动代码: H170YA\n  - 车型: nan\n  - 仪表盘指示: nan\n  - DTC码: nan\n  - 故障场景: 无法确认故障工况\n\n**工单 4** (ID: REC-42aed0e950fa, 相似度: 0.72)\n  - 问题描述: 行驶中顿挫：SPCA-107#日期：2026.7.11 时间：13:53 里程:16660km SOC:68% 工况：动力总成 驾驶模式:舒适-保电-强 空调：制冷 故障描述:车辆制动后，起步时提速很慢，速度提升至90后，开始出现持续顿挫，怀疑刹车未完全释放。（打点时间13:53）未拍摄视频或照片\n  - 根本原因: ①旋变励磁芯片温升优化前的硬件状态，故障时刻控制器温度过高，推测励磁芯片过温\n②由于MC阶段软件诊断不成熟，故无故障报出\n  - 对策: ①车辆为验证青山B点混动耐久，后电驱为陪试件，车辆为今年1月份骡子车，改制跑耐久未与相关专业确认是否满足状态，申请换件后关闭问题\n  - 驱动代码: H200N-2\n  - 车型: 试验车\n  - 仪表盘指示: 无\n  - DTC码: nan\n  - 故障场景: 平稳驾驶\n\n**工单 5** (ID: REC-0faeb0a11443, 相似度: 0.68)\n  - 问题描述: H56D-EV800V车辆R档全油门起步车辆顿挫\n  - 根本原因: 1、车辆顿挫的原因为前电机执行扭矩出现跳变；\n2、前电机扭矩突变的原因为：MCUF反馈的最大可用驱动扭矩跳变，导致实际执行扭矩受最大可用驱动扭矩限制出现突变；\n3、前电机最大可用驱动扭矩跳变的原因为：前电机在负转速（倒车）时计算的最大可用驱动扭矩采用最大可用发电功率进行查表，未使用最大可用驱动功率进行查表，导致驱动工况下最大可用发电功率跳变时，反馈的最大可用驱动扭矩受限出现突变，进而实际执行扭矩受限突变，引起车辆顿挫\n  - 对策: 1、按照扭矩交互需求，转速为为负，扭矩为负按照最大可用驱动功率进行查表\n  - 驱动代码: H170YA\n  - 车型: 试验车\n  - 仪表盘指示: 无\n  - DTC码: nan\n  - 故障场景: 激烈驾驶\n\n\n请开始诊断。先分析预检索结果与当前故障的关联。如果预检索结果充分且与当前故障高度相关，足以支撑诊断，直接给出 Final Answer。如果预检索结果不足或内容偏离，可以自行编辑更精准的检索词调用 search_similar_incidents 或 query_fault_graph 进一步检索，或调用 get_incident_detail 查看某个特定工单的完整详情，再给出 Final Answer，但不要重复执行和当前预检索关键词相同的搜索。\n助手: 针对“行驶时顿挫”的故障描述，由于缺乏具体的车型、DTC码及详细工况信息，结合历史相似工单分析，该现象通常由电驱系统的软件控制逻辑、通信状态或硬件温度异常引起。\n\n**根因分析**：\n1. **控制策略缺陷**：这是最常见的原因。例如在两驱切换四驱的靠齿策略执行中，若使能条件不满足导致异常退出，会引起动力中断和顿挫；此外，在特定工况（如R档倒车）下，若最大可用驱动扭矩查表逻辑错误（如误用发电功率查表），会导致扭矩受限突变，产生明显顿挫。\n2. **通信链路异常**：若Rolling Counter校验逻辑过严，可能导致PDCM等关键报文卡滞并触发E2E故障，造成扭矩指令响应延迟或丢失。\n3. **硬件过温**：如旋变励磁芯片过温，可能导致旋变信号失真，引起电机控制不稳，表现为持续顿挫（早期软件可能未报出DTC）。\n\n**解决方案**：\n建议优先连接诊断仪读取电驱系统数据流，重点监控目标扭矩与实际执行扭矩是否存在突变；同时检查CAN通信链路，排查关键报文是否有校验错误或丢帧；监控MCU及旋变芯片温度，排查过温隐患。若故障仅在特定工况（如大油门起步、模式切换）下复现，需联系软件团队核查对应状态机逻辑。\n\n**风险提示**：\n该故障评定为中风险（V2）。顿挫虽不一定导致车辆完全失去动力，但严重影响驾驶平顺性与体验，部分通信或策略问题可能伴随短暂的动力中断，存在一定安全隐患，建议及时排查。\n\n```json\n{\n  \"fault_root_cause\": [\n    \"控制策略逻辑缺陷（如靠齿策略异常退出或特定工况下扭矩查表逻辑错误）\",\n    \"通信链路异常（如Rolling Counter校验过严导致报文卡滞或E2E故障）\",\n    \"硬件过温导致传感器信号异常（如旋变励磁芯片过温引起信号失真）\"\n  ],\n  \"fault_trigger_condition\": \"行驶过程中，特别是在起步、急加速、制动后提速、倒车或驱动模式切换时\",\n  \"classification\": \"控制异常故障\",\n  \"solution\": [\n    \"使用诊断仪读取电驱系统数据流，重点监控目标扭矩与实际执行扭矩是否存在突变\",\n    \"检查CAN通信链路，排查PDCM等关键报文是否存在Rolling Counter校验错误或丢帧\",\n    \"监控MCU及旋变芯片温度，排查是否存在过温导致的信号失真\",\n    \"若为特定工况（如R档或两驱切四驱）复现，需核查并优化对应工况下的扭矩限制及状态机切换逻辑\"\n  ],\n  \"risk_warning\": \"V2\",\n  \"maintenance_suggestions\": \"定期升级电驱系统软件以修复已知的控制策略与通信校验缺陷；在耐久测试中加强对旋变等关键芯片的温升监控与硬件散热优化。\",\n  \"confidence\": 0.65,\n  \"reasoning_narrative\": \"当前故障描述仅为“行驶时顿挫”，信息极度宽泛。通过检索历史相似工单，发现顿挫现象在电驱系统中主要指向三大类问题：一是软件控制策略问题，如工单3中两驱切四驱靠齿策略异常退出，以及工单5中倒车工况下扭矩查表逻辑错误导致的扭矩突变；二是通信问题，如工单1中报文校验过严引发的E2E故障；三是硬件过温问题，如工单4中旋变励磁芯片过温导致的控制不稳。由于缺乏具体DTC和工况，无法锁定单一根因，因此诊断结论综合了上述历史高频原因，并给出了从数据流监控、通信排查到温度检测的系统性排查方案。置信度设为0.65，因为宽泛的描述需要结合实际测试才能最终定论。\"\n}\n```",
+      "status": "approved",
+      "reviewer": "admin",
+      "review_time": "2026-08-28T15:53:15.056738",
+      "review_comment": "",
+      "created_at": "2026-08-28T15:37:07.893168"
     }
   },
   "stats": {
-    "extractions": 18,
-    "entities_extracted": 193,
-    "relationships_extracted": 146,
-    "submitted_for_review": 18,
-    "approved_knowledge": 10,
+    "extractions": 19,
+    "entities_extracted": 215,
+    "relationships_extracted": 167,
+    "submitted_for_review": 19,
+    "approved_knowledge": 13,
     "rejected_knowledge": 4,
-    "errors": 2,
+    "errors": 4,
     "merged_entities": 25
   },
-  "saved_at": "2026-08-25T15:20:34.707895"
+  "saved_at": "2026-08-28T15:53:25.315764"
 }

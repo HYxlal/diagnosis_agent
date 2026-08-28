@@ -173,15 +173,15 @@ class LangChainDiagnosticAgent:
             router = InputRouter(self.settings)
             parsed_input = router.route(parsed_input)
 
-            # CAN 兜底：同步上下文用 asyncio.run() 调 async 方法
+            # CAN 兜底：调用 async 方法
             # 预检索 + 阈值判定 + CAN 解码，结果合并到 prepared_messages
             description = parsed_input.description or ""
             similar_cases, has_similar, top1_score = self.pre_retrieve(
                 parsed_input, description
             )
-            can_prepared = asyncio.run(self._maybe_can_fallback(
+            can_prepared = self._run_can_fallback_sync(
                 parsed_input, has_similar, top1_score
-            ))
+            )
             merged_prepared = list(prepared_messages or []) + (can_prepared or [])
 
             # 把 history_messages / prepared_messages 透传给内部 diagnose
@@ -212,6 +212,52 @@ class LangChainDiagnosticAgent:
                 code=OutputCode.INTERNAL_ERROR,
                 msg=f"输出转换失败: {str(e)}",
                 standard_input=standard_input,
+            )
+
+    def _run_can_fallback_sync(
+        self,
+        parsed_input: ParsedInput,
+        has_similar: bool,
+        top1_score: float,
+    ) -> list | None:
+        """同步上下文调用 async CAN 兜底的安全包装
+
+        asyncio.run() 不能在已有事件循环中调用（会抛
+        RuntimeError: asyncio.run() cannot be called from a running event loop）。
+        本方法检测当前是否已在事件循环中：
+        - 无事件循环 → asyncio.run()
+        - 已在事件循环 → 新建独立线程运行，避免阻塞或冲突
+        """
+        import threading
+        result: list | None = None
+        exc: Exception | None = None
+
+        def _runner():
+            nonlocal result, exc
+            try:
+                new_loop = asyncio.new_event_loop()
+                try:
+                    result = new_loop.run_until_complete(
+                        self._maybe_can_fallback(parsed_input, has_similar, top1_score)
+                    )
+                finally:
+                    new_loop.close()
+            except Exception as e:
+                exc = e
+
+        try:
+            asyncio.get_running_loop()
+            # 已在事件循环中，用独立线程运行
+            t = threading.Thread(target=_runner)
+            t.start()
+            t.join()
+            if exc:
+                raise exc
+            return result
+        except RuntimeError:
+            # 无事件循环，直接 asyncio.run()
+            return asyncio.run(
+                self._maybe_can_fallback(parsed_input, has_similar, top1_score)
             )
 
     async def _maybe_can_fallback(

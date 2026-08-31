@@ -68,7 +68,7 @@ from .prompts import (
     format_similar_cases_for_prompt,
 )
 from .context_manager import SimpleContextManager
-from .diagnostic_tools import DiagnosticTools
+from .tools import DiagnosticTools
 
 logger = logging.getLogger(__name__)
 

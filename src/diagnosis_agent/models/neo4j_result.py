@@ -154,7 +154,14 @@ class FaultCandidate:
 
         page_content 用 description（供精排算 embedding 和 Agent 阅读）；
         metadata 填展平后的结构化字段 + source 标签 + score。
+
+        注意：Neo4j 直接结构化召回未经过 reranker 精排时，final_score 默认是 0.0，
+        这种情况下赋默认值 0.9（结构化精确命中天然置信度高于语义检索），
+        彻底避免预检索阶段 Neo4j 召回结果显示相似度为 0 的异常现象。
         """
+        display_score = self.final_score
+        if display_score <= 0.0:
+            display_score = 0.9  # Neo4j 结构化字段精确命中默认相似度 0.9
         metadata = {
             "id": self.fault_id,
             "root_cause": self.root_cause,
@@ -164,7 +171,7 @@ class FaultCandidate:
             "vehicle_type": self.vehicle_type,
             "dashboard_indicator": ", ".join(self.indicators) if self.indicators else "",
             "fault_scenario": self.scenario,
-            "score": self.final_score,
+            "score": display_score,
             "source": self.source,
         }
         return Document(page_content=self.description, metadata=metadata)

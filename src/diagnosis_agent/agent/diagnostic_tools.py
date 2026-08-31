@@ -3,12 +3,9 @@
 使用 LangChain StructuredTool 动态创建工具，支持实例方法绑定。
 
 工具清单：
-1. search_similar_incidents — 语义检索相似历史工单
-2. query_fault_graph        — 结构化查询故障知识图谱（Neo4j 可用时自动注册）
-3. get_incident_detail      — 根据记录ID获取工单详情
-4. convert_working_condition_file — 将工况文件转换为结构化数据
-
-注意：CAN 报文处理完全在主流程 CAN 兜底路径内部实现，不暴露为 LLM 可调用工具。
+1. search_similar_incidents — 语义检索相似工单
+2. query_fault_graph       — 结构化图查询故障知识图谱
+3. get_incident_detail      — 获取工单详情
 """
 
 from __future__ import annotations
@@ -148,10 +145,6 @@ class DiagnosticTools:
         self._working_condition_converter = converter
         logger.info("工况文件转换工具已注册")
 
-    def convert_working_condition_file(self, file_path: str) -> dict:
-        """公开方法：主流程直接调用工况文件转换（非Agent工具调用路径）"""
-        return self._convert_working_condition_file_impl(file_path)
-
     # ------------------------------------------------------------------
     # 工具实现方法（内部方法）
     # ------------------------------------------------------------------
@@ -281,11 +274,11 @@ class DiagnosticTools:
 
     @staticmethod
     def _doc_to_dict(doc) -> dict:
-        """将 Document 转为字典（metadata["score"] 已经是 0~1 余弦相似度，无需再反转）"""
+        """将 Document 转为字典"""
         record = document_to_record(doc)
         d = record.to_dict()
         d["record_id"] = doc.metadata.get("id", "")
-        d["similarity"] = round(doc.metadata.get("score", 0.0), 4)
+        d["similarity"] = round(1 - doc.metadata.get("score", 0.0), 4)
         return d
 
     # ------------------------------------------------------------------
@@ -300,9 +293,8 @@ class DiagnosticTools:
 
         工具集：
         - search_similar_incidents：语义检索（模糊匹配现象）
-        - query_fault_graph：结构化图查询（精确匹配 DTC/电驱代号/场景等，Neo4j可用时注册）
+        - query_fault_graph：结构化图查询（精确匹配 DTC/电驱代号/场景等，可扩展图关系）
         - get_incident_detail：工单详情
-        - convert_working_condition_file：工况文件转换
         """
         tools = [
             StructuredTool.from_function(
@@ -334,12 +326,6 @@ class DiagnosticTools:
                 name="get_incident_detail",
                 description="根据记录ID获取详细信息。参数：record_id（记录ID）。",
                 args_schema=GetIncidentDetailInput,
-            ),
-            StructuredTool.from_function(
-                func=self._convert_working_condition_file_impl,
-                name="convert_working_condition_file",
-                description="将工况文件转换为结构化数据或自然语言描述。参数：file_path（工况文件路径）。",
-                args_schema=ConvertWorkingConditionFileInput,
             ),
         ])
         return tools

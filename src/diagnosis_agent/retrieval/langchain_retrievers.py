@@ -36,17 +36,15 @@ class ChromaVectorRetriever(BaseRetriever):
         """统一阈值过滤 + SearchResult → Document 转换逻辑
 
         Chroma 返回的是 cosine distance（值越小越相似），统一在此处做 <= 阈值判断。
-        所有上层调用方拿到的 metadata["score"] 直接是归一化后的余弦相似度 (0~1)，
-        无需再做 1-x 反转，彻底全链路统一避免方向写反。
+        所有上层调用方无需再写 score 判断，彻底避免方向写反的重复错误。
         """
         docs = []
         for result in results:
-            # 阈值判断：原始 cosine distance <= 阈值 → 通过
+            # 阈值判断全局唯一入口：cosine distance <= 阈值 → 通过
             if result.score <= self.score_threshold:
                 metadata = result.metadata.copy()
                 metadata["id"] = result.id
-                # 此处直接转换为 0~1 余弦相似度存入 metadata，全链路统一
-                metadata["score"] = max(0.0, 1.0 - result.score)
+                metadata["score"] = result.score
                 docs.append(Document(
                     page_content=result.content,
                     metadata=metadata,

@@ -438,7 +438,7 @@ class LangChainDiagnosticAgent:
 
             has_similar = len(similar_cases) > 0
             if similar_cases:
-                top1_similar_score = similar_cases[0].metadata.get("score", 0.0)
+                top1_similar_score = 1 - similar_cases[0].metadata.get("score", 0.0)
             if has_similar:
                 logger.info(
                     f"预检索: 共 {len(similar_cases)} 条相似工况, Top1相似度={top1_similar_score:.2f}"
@@ -486,7 +486,7 @@ class LangChainDiagnosticAgent:
         # 工况文件：先转换，然后把意图改回 DIAGNOSTIC_QUERY 进入正常诊断路径
         if parsed_input.intent == InputIntent.WORKING_CONDITION_FILE:
             logger.info("检测到工况文件意图，先调用转换工具")
-            convert_result = self._tools.convert_working_condition_file(parsed_input.source_file or "")
+            convert_result = self._tools._convert_working_condition_file_impl(parsed_input.source_file or "")
             if convert_result.get("description"):
                 description = convert_result["description"]
                 parsed_input.description = description
@@ -580,10 +580,10 @@ class LangChainDiagnosticAgent:
             similar_record_ids=[doc.metadata.get("id", "") for doc in similar_cases],
         )
 
-        # 提取Top1相似工况分数：metadata 已经是 0~1 余弦相似度，无需再转换
+        # 提取Top1相似工况分数：第一个检索结果的相似度（1 - distance）
         top1_score = 0.0
         if len(similar_cases) > 0:
-            top1_score = similar_cases[0].metadata.get("score", 0.0)
+            top1_score = 1.0 - similar_cases[0].metadata.get("score", 0.0)
             top1_score = max(0.0, min(1.0, top1_score))
 
         diagnostic_output = DiagnosticOutput(
@@ -908,7 +908,7 @@ class LangChainDiagnosticAgent:
         table.add_column("根因", style="yellow", width=30)
         for i, doc in enumerate(similar_cases, 1):
             meta = doc.metadata
-            similarity = meta.get("score", 0.0)  # metadata 已提前转成 0~1 相似度
+            similarity = 1 - meta.get("score", 0)
             table.add_row(
                 str(i),
                 meta.get("id", "N/A"),

@@ -42,8 +42,10 @@ async def preprocess_can_file(fault_data_url: str) -> str | None:
                 with open(dbc_path, "wb") as f:
                     f.write(dbc_resp.content)
 
-        if not dbc_path or not can_path:
+        if not can_path:
+            logger.warning("CAN 日志文件路径为空，跳过解码")
             return None
+        # DBC 文件可选，解码器内置默认DBC支持无外置DBC场景
 
         from .can_converter_tool import can_converter_impl
         result = json.loads(can_converter_impl(file_path=can_path, dbc_path=dbc_path, output_dir=str(tmp_dir)))

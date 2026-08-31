@@ -68,7 +68,7 @@ from .prompts import (
     format_similar_cases_for_prompt,
 )
 from .context_manager import SimpleContextManager
-from .tools import DiagnosticTools
+from .diagnostic_tools import DiagnosticTools
 
 logger = logging.getLogger(__name__)
 
@@ -580,10 +580,10 @@ class LangChainDiagnosticAgent:
             similar_record_ids=[doc.metadata.get("id", "") for doc in similar_cases],
         )
 
-        # 提取Top1相似工况分数：第一个检索结果的相似度（1 - distance）
+        # 提取Top1相似工况分数：metadata 已经是 0~1 余弦相似度，无需再转换
         top1_score = 0.0
         if len(similar_cases) > 0:
-            top1_score = 1.0 - similar_cases[0].metadata.get("score", 1.0)
+            top1_score = similar_cases[0].metadata.get("score", 0.0)
             top1_score = max(0.0, min(1.0, top1_score))
 
         diagnostic_output = DiagnosticOutput(
@@ -908,7 +908,7 @@ class LangChainDiagnosticAgent:
         table.add_column("根因", style="yellow", width=30)
         for i, doc in enumerate(similar_cases, 1):
             meta = doc.metadata
-            similarity = 1 - meta.get("score", 0)
+            similarity = meta.get("score", 0.0)  # metadata 已提前转成 0~1 相似度
             table.add_row(
                 str(i),
                 meta.get("id", "N/A"),

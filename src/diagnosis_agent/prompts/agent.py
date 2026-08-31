@@ -27,9 +27,8 @@ AGENT_SYSTEM_PROMPT_LIGHTWEIGHT = """你是一个专业的车辆故障诊断专�
 
 1. **search_similar_incidents** — 语义检索历史工单
 2. **query_fault_graph** — 结构化图查询故障知识图谱
-3. **can_converter** — CAN 报文转 CSV/Excel
-4. **get_incident_detail** — 查看工单详情
-5. **convert_working_condition_file** — 工况文件转换
+3. **get_incident_detail** — 查看工单详情
+4. **convert_working_condition_file** — 工况文件转换
 
 ## 工具使用策略
 
@@ -89,9 +88,8 @@ AGENT_SYSTEM_PROMPT_FULL = """你是一个专业的车辆故障诊断专家 Agen
 
 1. **search_similar_incidents** — 语义检索历史工单
 2. **query_fault_graph** — 结构化图查询故障知识图谱
-3. **can_converter** — CAN 报文转 CSV/Excel
-4. **get_incident_detail** — 查看工单详情
-5. **convert_working_condition_file** — 工况文件转换
+3. **get_incident_detail** — 查看工单详情
+4. **convert_working_condition_file** — 工况文件转换
 
 ## 工具使用策略
 
